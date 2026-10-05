@@ -756,8 +756,39 @@ def _notify(title: str, message: str, subtitle: str = "") -> None:
     )
 
 
-def is_login_item() -> bool:
-    rc, out, _ = run_cmd(
+# Starting at login is a LaunchAgent rather than a System Events login item,
+# because a login item cannot pass arguments and this app needs --background: a
+# menu-bar resident should come up in the menu bar, not open a window and steal
+# the dock and the foreground while you are still logging in. Same shape as Lab
+# Hub's com.netrunner3000.labhub.login.
+APP_BUNDLE = Path("/Applications/Backup Control Center.app")
+LOGIN_AGENT_LABEL = "com.wwds-dev.backup-control-center.login"
+LOGIN_AGENT_PLIST = HOME / "Library" / "LaunchAgents" / f"{LOGIN_AGENT_LABEL}.plist"
+
+_LOGIN_AGENT_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+\t<key>Label</key>
+\t<string>{label}</string>
+\t<key>ProgramArguments</key>
+\t<array>
+\t\t<string>/usr/bin/open</string>
+\t\t<string>-a</string>
+\t\t<string>{app}</string>
+\t\t<string>--args</string>
+\t\t<string>--background</string>
+\t</array>
+\t<key>RunAtLoad</key>
+\t<true/>
+</dict>
+</plist>
+"""
+
+
+def _legacy_login_item() -> bool:
+    """The old System Events login item, kept only so it can be cleaned up."""
+    _, out, _ = run_cmd(
         ["osascript", "-e",
          'tell application "System Events" to return (name of login items) contains "Backup Control Center"'],
         timeout=10,
@@ -765,14 +796,54 @@ def is_login_item() -> bool:
     return out.strip().lower() == "true"
 
 
+def _remove_legacy_login_item() -> None:
+    if _legacy_login_item():
+        run_cmd(["osascript", "-e",
+                 'tell application "System Events" to delete login item "Backup Control Center"'],
+                timeout=10)
+
+
+def is_login_item() -> bool:
+    return LOGIN_AGENT_PLIST.exists() or _legacy_login_item()
+
+
 def set_login_item(enable: bool) -> tuple:
     if enable:
-        script = ('tell application "System Events" to make new login item at end '
-                  'with properties {path:"/Applications/Backup Control Center.app", hidden:false}')
-    else:
-        script = 'tell application "System Events" to delete login item "Backup Control Center"'
-    rc, _, err = run_cmd(["osascript", "-e", script], timeout=10)
-    return rc == 0, err
+        if not APP_BUNDLE.exists():
+            return False, (f"{APP_BUNDLE} is not installed.\n"
+                           "Run build_app.sh first — a LaunchAgent opens the bundle, "
+                           "not this checkout.")
+        try:
+            LOGIN_AGENT_PLIST.parent.mkdir(parents=True, exist_ok=True)
+            LOGIN_AGENT_PLIST.write_text(
+                _LOGIN_AGENT_TEMPLATE.format(label=LOGIN_AGENT_LABEL, app=APP_BUNDLE))
+        except OSError as e:
+            return False, str(e)
+        run_cmd(["launchctl", "unload", str(LOGIN_AGENT_PLIST)], timeout=15)
+        rc, _, err = run_cmd(["launchctl", "load", str(LOGIN_AGENT_PLIST)], timeout=15)
+        # A login item and the agent would both fire; the agent is the one that
+        # can ask for --background, so the login item goes.
+        _remove_legacy_login_item()
+        return rc == 0, err
+    run_cmd(["launchctl", "unload", str(LOGIN_AGENT_PLIST)], timeout=15)
+    try:
+        LOGIN_AGENT_PLIST.unlink(missing_ok=True)
+    except OSError as e:
+        return False, str(e)
+    _remove_legacy_login_item()
+    return True, ""
+
+
+def migrate_login_item() -> None:
+    """Convert an existing login item to the background LaunchAgent, once.
+
+    Without this, someone who enabled "Open at login" before would keep getting
+    the window and the dock tile at every login until they toggled the setting
+    off and on again.
+    """
+    if LOGIN_AGENT_PLIST.exists() or not _legacy_login_item():
+        return
+    set_login_item(True)
 
 
 # ----------------------------------------------------------------------------
@@ -1044,8 +1115,11 @@ class StorageTile(QFrame):
         self.account_lbl.setObjectName("TileAccount")
         self.account_lbl.setWordWrap(True)
         self.account_lbl.setToolTip(name)
-        self.account_lbl.setVisible(bool(account))
+        # Parent before setVisible. setVisible(True) on a widget that has no
+        # parent yet shows it as its own top-level window — a sliver of a window
+        # flashing on screen for every tile that has an account line.
         layout.addWidget(self.account_lbl)
+        self.account_lbl.setVisible(bool(account))
 
         self.bar = QProgressBar()
         self.bar.setRange(0, 100)
@@ -1372,11 +1446,21 @@ class StorageCard(Card):
             self.refresh()
 
     def refresh(self):
-        for t in self.tiles:
-            t.setParent(None)
-        # Remove the trailing stretch added by the previous refresh
+        # Take each old tile out of the layout, then hide it *before* dropping
+        # its parent. setParent(None) on a visible widget makes it a top-level
+        # window and Qt leaves it visible: every tile popped out as its own
+        # floating 230px panel on screen, which is what a refresh triggered at
+        # startup (network reachability, theme change) looked like. hide() first
+        # keeps it hidden through the reparent; deleteLater() then disposes of
+        # it, which setParent(None) alone never did — the tile's own button
+        # lambdas capture the tile, so the reference cycle outlived the refresh.
         while self.tiles_row.count():
-            self.tiles_row.takeAt(0)
+            item = self.tiles_row.takeAt(0)
+            w = item.widget() if item is not None else None
+            if w is not None:
+                w.hide()
+                w.setParent(None)
+                w.deleteLater()
         self.tiles = []
         targets = [t for t in storage_targets() if t[2]]
         mounted_keys = {name for name, _path, _exists in targets}
@@ -2084,7 +2168,8 @@ class BackupStatusCard(Card):
 
     def refresh_login_item(self):
         is_item = is_login_item()
-        self.login_lbl.setText("🚀 Open at login: " + ("ENABLED" if is_item else "disabled"))
+        self.login_lbl.setText("🚀 Open at login (menu bar only): "
+                               + ("ENABLED" if is_item else "disabled"))
         self.login_btn.setText("Disable" if is_item else "Enable")
 
     def toggle_login_item(self):
@@ -3246,11 +3331,19 @@ def main():
     _DARK = _system_dark_mode()
     app = QuitInterceptApp(sys.argv)
     app.setQuitOnLastWindowClosed(False)
+    if background:
+        # Before the window exists, so the dock tile is never claimed. The app
+        # is Regular by default (no LSUIElement in the bundle), and a login
+        # launch that takes the dock and the foreground is the thing --background
+        # is for.
+        _set_dock_icon_visible(False)
     app.setStyleSheet(build_app_style(_DARK))
     win = MainWindow()
     app.set_window(win)
     if not background:
         win.show()
+    # Runs after the window exists so a failure here cannot stop the app coming up.
+    migrate_login_item()
     sys.exit(app.exec())
 
 

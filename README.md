@@ -49,7 +49,7 @@ last 60 lines of the most recent run so status is visible without triggering a n
 |---|---|
 | **🕒 Nightly schedule** | Enables the in-app auto-backup timer (time is configurable in ⚙ Settings) |
 | **⏰ Wake Mac** | `pmset` wake schedule set 5 min before the backup time — **required** for overnight backups when the Mac sleeps |
-| **🚀 Open at login** | Registers the app as a macOS Login Item |
+| **🚀 Open at login (menu bar only)** | Installs a LaunchAgent that opens the app with `--background` at login — menu-bar icon only, no window and no dock tile (see *Starting at login* below) |
 | **🌐 Network trigger** | Label showing whether the network-reconnect trigger loaded successfully |
 
 **Notifications:**
@@ -122,6 +122,28 @@ hide the window *and drop the app out of the dock*, but leave it running in the 
 bar so the nightly schedule, network trigger and USB trigger keep working. macOS calls
 this an accessory app; the app switches its own activation policy at runtime.
 A notification says so, since a Quit that visibly does nothing looks like a hang.
+
+### Starting at login
+
+**It is a LaunchAgent, not a login item.** `com.wwds-dev.backup-control-center.login`
+runs `open -a "/Applications/Backup Control Center.app" --args --background`, and
+`--background` is the whole reason: the app comes up as a menu-bar accessory with no
+window and no dock tile, which is what a background backup minder should do when you
+log in.
+
+A macOS login item **cannot pass arguments**, so the login item this toggle used to
+create could only start the app the default way — window in the foreground, dock tile,
+every single login. The app had `--background` all along and no way to ask for it.
+Same shape as Lab Hub's `com.netrunner3000.labhub.login`, for the same reason.
+
+Two details that are easy to get wrong:
+
+- `--background` sets the accessory activation policy **before the window is built**.
+  The bundle has no `LSUIElement`, so the app starts Regular and would otherwise claim
+  the dock tile before anything hid it.
+- An existing login item is converted on first launch (`migrate_login_item()`) and
+  deleted when the agent is installed. Leaving both in place means both fire, and the
+  login item is the one that opens a window.
 
 To exit completely, use **Quit** in this menu.
 
@@ -202,7 +224,7 @@ contexts.
 1. Set the backup time in **⚙ Settings** (default 03:30).
 2. Enable **🕒 Nightly schedule**.
 3. Enable **⏰ Wake Mac** so the Mac powers on 5 minutes before the scheduled time.
-4. Enable **🚀 Open at login** so the app is running when the Mac wakes.
+4. Enable **🚀 Open at login (menu bar only)** so the app is running when the Mac wakes.
 
 **Timer flow:**
 1. 5-minute polling timer runs while the app is open.

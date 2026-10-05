@@ -28,6 +28,28 @@
   build its Launch button would open. Lab-wide scheme, same two inputs as the Lab Project
   Monitor.
 
+- [x] `P1` `bug` `@ai` **Every storage tile popped out of the window as its own floating panel.**
+  Two separate escapes, both of which put a real top-level window on screen.
+  `StorageTile.__init__` called `setVisible(True)` on the account label *before*
+  adding it to the tile's layout — a widget with no parent is a window, so each tile
+  with an account line flashed one. And `StorageCard.refresh()` dropped the old tiles
+  with `setParent(None)`, which turns a *visible* widget into a visible top-level
+  window; Qt does not hide it for you. Any refresh with the window open (the 5-minute
+  timer, network coming back, a theme change, "Refresh all") left the whole row of
+  230px tiles floating over the desktop. Tiles are now hidden before the reparent and
+  disposed of with `deleteLater()` — `setParent(None)` alone never freed them either,
+  because each tile's own button lambdas capture the tile. `tests/test_tile_windows.py`
+  checks both by behaviour.
+
+- [x] `P1` `bug` `@ai` **"Open at login" opened a window and took the dock, every login.**
+  It registered a System Events login item, and a login item cannot pass arguments, so
+  the app could only start its default way. It is a LaunchAgent now
+  (`com.wwds-dev.backup-control-center.login`) running `open -a … --args --background`,
+  which is the mode the app already had. `--background` also sets the accessory
+  activation policy before the window is built, so no dock tile is claimed on the way
+  up. An existing login item is migrated on first launch and removed, since both would
+  otherwise fire. `tests/test_login_agent.py`.
+
 ## v3 — blocked or deferred
 
 - [ ] `P1` `infra` `@me` **Developer ID code signing** — needs a paid Apple Developer account ($99/yr). Removes the Full Disk Access re-grant after every rebuild and makes the launchd fallback reliable. Cannot be done in code.

@@ -20,6 +20,8 @@ Status: `IDEA` · `CONSIDERING` · `PLANNED` · `DONE` · `REJECTED`
 | Suggestion | When |
 |---|---|
 | Lab Hub integration — launchable from the hub, which also shows its running state | Aug 2026 |
+| Storage tiles no longer escape the window as floating panels (parentless-widget shows, and `setParent(None)` on a visible tile) | Oct 2026 |
+| Open at login starts in the menu bar only — LaunchAgent with `--background` instead of a login item | Oct 2026 |
 | Backup pause / resume (SIGSTOP / SIGCONT) | Aug 2026 |
 | Tray icon badge (orange dot) when overdue | Aug 2026 |
 | Log scroll position restored on relaunch | Aug 2026 |
