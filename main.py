@@ -44,7 +44,7 @@ from PySide6.QtNetwork import QNetworkInformation
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QListWidget, QTextEdit, QTextBrowser, QFileDialog, QMessageBox, QDialog,
-    QPlainTextEdit, QListWidgetItem, QFrame, QScrollArea, QProgressBar,
+    QPlainTextEdit, QFrame, QScrollArea, QProgressBar,
     QGraphicsDropShadowEffect, QSizePolicy, QLineEdit, QFormLayout, QComboBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QSystemTrayIcon, QMenu, QCheckBox, QSpinBox,
     QLayout, QAbstractScrollArea,
@@ -357,6 +357,9 @@ QTableWidget {{
     gridline-color: {list_bdr};
     outline: 0;
 }}
+QTableWidget::item {{
+    padding: 0 10px;  /* the header sections' inset, so text lines up under its heading */
+}}
 QTableWidget::item:selected {{
     background: {sel_bg};
     color: {text};
@@ -553,15 +556,6 @@ def write_folders(folders):
         "# Edited by hand or by the Backup Control Center app.\n"
     )
     FOLDERS_FILE.write_text(header + "\n".join(folders) + "\n")
-
-
-def du_size(path):
-    if not Path(path).exists():
-        return "—"
-    rc, out, _ = run_cmd(["du", "-sh", str(path)], timeout=120)
-    if rc == 0 and out:
-        return out.split("\t", 1)[0].strip()
-    return "?"
 
 
 def launchd_loaded():
@@ -972,17 +966,22 @@ class SizeWorker(QThread):
         self.folders = folders
 
     def run(self):
+        # One `du` per folder: these are the whole backup set, and walking
+        # each twice (once for the row, once for the total) doubled the wait.
         sizes = {}
         total = 0
         for f in self.folders:
             p = DOCS / f
-            sizes[f] = du_size(p)
+            sizes[f] = "—"
             rc, out, _ = run_cmd(["du", "-sk", str(p)], timeout=120) if p.exists() else (1, "", "")
             if rc == 0 and out:
                 try:
-                    total += int(out.split("\t", 1)[0]) * 1024
+                    n = int(out.split("\t", 1)[0]) * 1024
                 except ValueError:
-                    pass
+                    sizes[f] = "?"
+                    continue
+                sizes[f] = human_size(n)
+                total += n
         self.done.emit(sizes, human_size(total))
 
 
@@ -2429,12 +2428,26 @@ class FoldersCard(Card):
 
     def __init__(self):
         super().__init__("Backed-up Folders", "What gets rsync'd to Google Drive")
-        self.list = QListWidget()
-        self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.list.setTextElideMode(Qt.ElideMiddle)
-        self.list.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.list.customContextMenuRequested.connect(self._folder_context_menu)
-        self.body(self.list)
+        # A table, not a list of "name — last synced: …" strings: the dates
+        # only line up when they sit in a column of their own.
+        self.table = QTableWidget(0, 3)
+        self.table.setHorizontalHeaderLabels(["Folder", "Last synced", "Size"])
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.table.horizontalHeaderItem(2).setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SingleSelection)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setAlternatingRowColors(True)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.table.setTextElideMode(Qt.ElideMiddle)
+        self.table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._folder_context_menu)
+        self.body(self.table)
 
         row = QHBoxLayout()
         add = secondary_button("➕ Add folder")
@@ -2456,20 +2469,38 @@ class FoldersCard(Card):
         self.reload_folders()
 
     def reload_folders(self):
-        self.list.clear()
         sync_times = last_sync_per_folder()
-        for f in read_folders():
+        folders = read_folders()
+        self.table.setRowCount(len(folders))
+        for r, f in enumerate(folders):
+            name = QTableWidgetItem(f)
+            name.setData(Qt.UserRole, f)
+            name.setToolTip(str(DOCS / f))
+            self.table.setItem(r, 0, name)
             last = sync_times.get(f)
-            display = f"{f}   —   last synced: {last}" if last else f"{f}   —   never synced"
-            item = QListWidgetItem(display)
-            item.setData(Qt.UserRole, f)
-            self.list.addItem(item)
-        fit_height_to_rows(self.list)
+            synced = QTableWidgetItem(last[:16] if last else "never synced")
+            if not last:
+                synced.setForeground(QColor("#d97706"))
+            self.table.setItem(r, 1, synced)
+            size = QTableWidgetItem("…")
+            size.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            self.table.setItem(r, 2, size)
+        fit_height_to_rows(self.table)
         self.total_lbl.setText("Backup set size: calculating…")
-        self.worker = SizeWorker(read_folders())
-        self.worker.done.connect(lambda sizes, total: self.total_lbl.setText(
-            f"Backup set size (local originals): {total}"))
+        self.worker = SizeWorker(folders)
+        self.worker.done.connect(self._show_sizes)
         self.worker.start()
+
+    def _show_sizes(self, sizes, total):
+        for r in range(self.table.rowCount()):
+            item = self.table.item(r, 2)
+            if item is not None:
+                item.setText(sizes.get(self._folder_at(r), "?"))
+        self.total_lbl.setText(f"Backup set size (local originals): {total}")
+
+    def _folder_at(self, row):
+        item = self.table.item(row, 0)
+        return item.data(Qt.UserRole) if item is not None else None
 
     def add_folder(self):
         d = QFileDialog.getExistingDirectory(self, "Pick a folder under Documents", str(DOCS))
@@ -2490,10 +2521,9 @@ class FoldersCard(Card):
         self.reload_folders()
 
     def remove_folder(self):
-        item = self.list.currentItem()
-        if not item:
+        folder_name = self._folder_at(self.table.currentRow())
+        if not folder_name:
             return
-        folder_name = item.data(Qt.UserRole) or item.text()
         answer = QMessageBox.question(
             self, "Remove folder",
             f'Remove "{folder_name}" from the backup?\n\nFiles already in Google Drive are not deleted.',
@@ -2507,13 +2537,12 @@ class FoldersCard(Card):
         self.reload_folders()
 
     def _folder_context_menu(self, pos):
-        item = self.list.itemAt(pos)
-        if not item:
+        folder = self._folder_at(self.table.rowAt(pos.y()))
+        if not folder:
             return
-        folder = item.data(Qt.UserRole) or item.text()
         menu = QMenu(self)
         backup_action = menu.addAction(f"▶ Back up '{folder}' now")
-        action = menu.exec(self.list.viewport().mapToGlobal(pos))
+        action = menu.exec(self.table.viewport().mapToGlobal(pos))
         if action == backup_action:
             self.single_backup_requested.emit(folder)
 
@@ -2536,6 +2565,7 @@ class LabHealthCard(Card):
         for col in range(5):
             header.setSectionResizeMode(col, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(5, QHeaderView.Stretch)
+        header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.verticalHeader().setVisible(False)

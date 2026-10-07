@@ -71,7 +71,7 @@ last 60 lines of the most recent run so status is visible without triggering a n
 Add or remove folders from the rsync job (confirmation required before removal), edit
 rsync exclude patterns, and see the total local size of the backup set.
 
-- Each folder shows its **last-synced timestamp** (scanned from the most recent log).
+- A table of **Folder · Last synced · Size**: the last-synced time is scanned from the most recent logs (amber "never synced" if a folder has no OK line yet), and the size is each folder's local `du`, filled in once the scan finishes.
 - **Right-click any folder** → "Back up now" runs rsync for just that one folder — no
   need to wait for the full nightly run after a large edit.
 - **Exclude patterns → 🔍 Preview matches** — runs `find` against your backed-up folders
