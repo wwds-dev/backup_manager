@@ -9,6 +9,12 @@ backup (the rsync job in `_Admin/backup/`).
 Single-screen, scrollable dashboard with seven cards plus a menu-bar icon. Launches
 maximized. The **☀/🌙** and **⚙** buttons live in the top-right of the header.
 
+**Scrolling** works like Safari: each scroll gesture goes to one place for its whole
+length. The backup log takes the scroll only when the gesture *starts* over it and it can
+still move that way; otherwise the page scrolls, and keeps scrolling when the pointer
+drifts over the log. The folder list and the Lab Health table are sized to show every
+row, so they never scroll inside the page.
+
 ---
 
 ### Storage

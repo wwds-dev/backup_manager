@@ -47,7 +47,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit, QListWidgetItem, QFrame, QScrollArea, QProgressBar,
     QGraphicsDropShadowEffect, QSizePolicy, QLineEdit, QFormLayout, QComboBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QSystemTrayIcon, QMenu, QCheckBox, QSpinBox,
-    QLayout,
+    QLayout, QAbstractScrollArea,
 )
 
 import cloud_quota
@@ -2430,7 +2430,8 @@ class FoldersCard(Card):
     def __init__(self):
         super().__init__("Backed-up Folders", "What gets rsync'd to Google Drive")
         self.list = QListWidget()
-        self.list.setFixedHeight(120)
+        self.list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.list.setTextElideMode(Qt.ElideMiddle)
         self.list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self._folder_context_menu)
         self.body(self.list)
@@ -2463,6 +2464,7 @@ class FoldersCard(Card):
             item = QListWidgetItem(display)
             item.setData(Qt.UserRole, f)
             self.list.addItem(item)
+        fit_height_to_rows(self.list)
         self.total_lbl.setText("Backup set size: calculating…")
         self.worker = SizeWorker(read_folders())
         self.worker.done.connect(lambda sizes, total: self.total_lbl.setText(
@@ -2538,7 +2540,6 @@ class LabHealthCard(Card):
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.verticalHeader().setVisible(False)
         self.table.setAlternatingRowColors(True)
-        self.table.setMinimumHeight(280)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._context_menu)
         self.body(self.table)
@@ -2607,6 +2608,7 @@ class LabHealthCard(Card):
             if notes:
                 notes_item.setForeground(QColor("#d97706"))
             self.table.setItem(r, 5, notes_item)
+        fit_height_to_rows(self.table)
 
         n_reclaim = sum(1 for row in rows if row["reclaim_kb"] > 0)
         self.summary_lbl.setText(
@@ -2952,23 +2954,105 @@ class ToolsCard(Card):
 
 
 # ----------------------------------------------------------------------------
-# Scroll area that yields wheel events to inner scrollable children
-# so scrolling a log box / folder list doesn't scroll the whole window.
+# Page scrolling with gesture latching
 # ----------------------------------------------------------------------------
-class SmartScrollArea(QScrollArea):
-    _SCROLLABLES = (QTextEdit, QPlainTextEdit, QListWidget, QTableWidget)
+def fit_height_to_rows(view, min_rows=1):
+    """Size a list or table to show every row, so it never scrolls inside the page.
 
-    def wheelEvent(self, event):
-        # Find the widget under the cursor
-        w = QApplication.widgetAt(event.globalPosition().toPoint())
-        while w is not None:
-            if isinstance(w, self._SCROLLABLES):
-                QApplication.sendEvent(w, event)
-                return
-            if w is self:
-                break
-            w = w.parent()
-        super().wheelEvent(event)
+    A box that scrolls inside a scrolling page is a trap for the wheel; one that
+    is simply as tall as its contents is not. Only the backup log keeps a
+    scrollbar of its own, because it is unbounded.
+    """
+    rows = view.model().rowCount()
+    h = 2 * view.frameWidth()
+    if isinstance(view, QTableWidget):
+        if view.horizontalHeader().isVisibleTo(view):
+            h += view.horizontalHeader().sizeHint().height()
+        row_h = sum(view.rowHeight(r) for r in range(rows))
+        h += row_h or view.verticalHeader().defaultSectionSize() * min_rows
+    else:
+        row_h = sum(view.sizeHintForRow(r) for r in range(rows))
+        h += row_h or (view.fontMetrics().height() + 8) * min_rows
+    if view.horizontalScrollBar().isVisible():
+        h += view.horizontalScrollBar().sizeHint().height()
+    view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    view.setFixedHeight(h)
+
+
+class SmartScrollArea(QScrollArea):
+    """Routes each scroll gesture to one place for its whole length.
+
+    This is how Safari and native Mac views behave: an inner box (the backup
+    log) takes the wheel only when the gesture *starts* over it and it can
+    still move that way; otherwise the page scrolls, and keeps scrolling when
+    the pointer then drifts over a box. The previous version sent every event
+    to whatever box was under the pointer, so a page scroll stalled the moment
+    one passed beneath the cursor.
+
+    A gesture is a trackpad ScrollBegin…momentum…ScrollEnd sequence, or, for a
+    mouse wheel (no phases), a run of clicks less than GESTURE_GAP_MS apart.
+    """
+    GESTURE_GAP_MS = 300
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._latched = None    # scrollbar that owns the current gesture
+        self._origin = None     # widget the current gesture started over
+        self._last_ms = None
+        QApplication.instance().installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if (event.type() == QEvent.Wheel and isinstance(obj, QWidget)
+                and self.isAncestorOf(obj)):
+            self._route(obj, event)
+            return True
+        return False
+
+    def _is_new_gesture(self, event, now):
+        phase = event.phase()
+        if phase == Qt.ScrollBegin:
+            return True
+        if phase == Qt.NoScrollPhase:
+            return self._last_ms is None or now - self._last_ms > self.GESTURE_GAP_MS
+        return self._latched is None and self._origin is None
+
+    @staticmethod
+    def _bar_for(area, event):
+        d = event.angleDelta()
+        return area.horizontalScrollBar() if abs(d.x()) > abs(d.y()) else area.verticalScrollBar()
+
+    @staticmethod
+    def _deliver(bar, event):
+        # Straight to the bar's handler: no event filters, no propagation to
+        # parents, and isAccepted() then says whether the bar actually moved.
+        event.ignore()
+        bar.event(event)
+        return event.isAccepted()
+
+    def _route(self, obj, event):
+        now = int(datetime.now().timestamp() * 1000)
+        if self._is_new_gesture(event, now):
+            self._latched, self._origin = None, obj
+        self._last_ms = now
+
+        if self._latched is None:
+            if event.angleDelta().isNull() and event.pixelDelta().isNull():
+                return  # ScrollBegin carries no movement; decide on the first that does
+            w = self._origin if self._origin is not None else obj
+            while w is not None and w is not self:
+                if isinstance(w, QAbstractScrollArea):
+                    bar = self._bar_for(w, event)
+                    if bar.maximum() > bar.minimum() and self._deliver(bar, event):
+                        self._latched = bar
+                        return
+                w = w.parentWidget()
+            self._latched = self._bar_for(self, event)
+
+        try:
+            self._deliver(self._latched, event)
+        except RuntimeError:  # the latched box was deleted mid-gesture
+            self._latched = self._bar_for(self, event)
+            self._deliver(self._latched, event)
 
 
 # ----------------------------------------------------------------------------
