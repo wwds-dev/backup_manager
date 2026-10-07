@@ -569,14 +569,46 @@ def launchd_loaded():
     return LAUNCHD_LABEL in out
 
 
-def wake_schedule_active():
+WAKE_LEAD_MIN = 5
+
+
+def wake_time_for_backup(hour, minute):
+    """The wake time that precedes a backup at hour:minute by WAKE_LEAD_MIN."""
+    total = (hour * 60 + minute - WAKE_LEAD_MIN) % (24 * 60)
+    return divmod(total, 60)
+
+
+def parse_repeating_wake(sched_out):
+    """`pmset -g sched` -> (hour, minute) of the repeating wake, or None.
+
+    pmset prints `wakepoweron at 3:25AM every day` — 12-hour, no leading zero —
+    so searching for "03:25" never matched and the toggle read "disabled" forever.
+    Only the "Repeating power events" block counts; the one-off events below it
+    are macOS's own timers and come and go.
+    """
+    in_repeating = False
+    for line in sched_out.splitlines():
+        if line.strip().endswith(":") and not line.startswith(" "):
+            in_repeating = line.startswith("Repeating power events")
+            continue
+        if not in_repeating:
+            continue
+        m = re.search(r"\bwake\w*\s+at\s+(\d{1,2}):(\d{2})\s*([AP]M)", line, re.I)
+        if m:
+            h, mins, ampm = int(m.group(1)), int(m.group(2)), m.group(3).upper()
+            h = h % 12 + (12 if ampm == "PM" else 0)
+            return h, mins
+    return None
+
+
+def current_wake_schedule():
     _, out, _ = run_cmd(["pmset", "-g", "sched"], timeout=10)
-    return "03:25" in out
+    return parse_repeating_wake(out)
 
 
-def set_wake_schedule(enable):
+def set_wake_schedule(enable, hour=3, minute=25):
     if enable:
-        cmd = "pmset repeat wakeorpoweron MTWRFSU 03:25:00"
+        cmd = f"pmset repeat wakeorpoweron MTWRFSU {hour:02d}:{minute:02d}:00"
     else:
         cmd = "pmset repeat cancel"
     rc, _, err = run_cmd([
@@ -2154,18 +2186,24 @@ class BackupStatusCard(Card):
             f"🕒 Nightly schedule ({time_str}): " + ("ENABLED" if loaded else "disabled"))
         self.sched_btn.setText("Disable" if loaded else "Enable")
 
-    def refresh_wake(self):
-        active = wake_schedule_active()
+    def _wanted_wake(self):
         st = _load_state()
-        bk_h, bk_m = st.get("backup_hour", 3), st.get("backup_minute", 30)
-        wake_m = bk_m - 5
-        wake_h = bk_h
-        if wake_m < 0:
-            wake_m += 60
-            wake_h = (bk_h - 1) % 24
-        self.wake_lbl.setText(
-            f"⏰ Wake Mac at {wake_h:02d}:{wake_m:02d} for backup: " + ("ENABLED" if active else "disabled"))
-        self.wake_btn.setText("Disable" if active else "Enable")
+        return wake_time_for_backup(st.get("backup_hour", 3), st.get("backup_minute", 30))
+
+    def refresh_wake(self):
+        current = current_wake_schedule()
+        wake_h, wake_m = self._wanted_wake()
+        label = f"⏰ Wake Mac at {wake_h:02d}:{wake_m:02d} for backup: "
+        if current is None:
+            self.wake_lbl.setText(label + "disabled")
+            self.wake_btn.setText("Enable")
+        elif current == (wake_h, wake_m):
+            self.wake_lbl.setText(label + "ENABLED")
+            self.wake_btn.setText("Disable")
+        else:
+            # The backup time was changed in Settings after the wake was set.
+            self.wake_lbl.setText(label + f"set for {current[0]:02d}:{current[1]:02d} instead")
+            self.wake_btn.setText("Update")
 
     def refresh_login_item(self):
         is_item = is_login_item()
@@ -2181,10 +2219,11 @@ class BackupStatusCard(Card):
         self.refresh_login_item()
 
     def toggle_wake(self):
-        if wake_schedule_active():
+        wanted = self._wanted_wake()
+        if current_wake_schedule() == wanted:
             ok, err = set_wake_schedule(False)
         else:
-            ok, err = set_wake_schedule(True)
+            ok, err = set_wake_schedule(True, *wanted)
         if not ok:
             if err and "User cancelled" not in err:
                 QMessageBox.warning(self, "Wake schedule", f"Could not update wake schedule:\n{err}")

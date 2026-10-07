@@ -48,7 +48,7 @@ last 60 lines of the most recent run so status is visible without triggering a n
 | Toggle | Effect |
 |---|---|
 | **🕒 Nightly schedule** | Enables the in-app auto-backup timer (time is configurable in ⚙ Settings) |
-| **⏰ Wake Mac** | `pmset` wake schedule set 5 min before the backup time — **required** for overnight backups when the Mac sleeps |
+| **⏰ Wake Mac** | `pmset` wake schedule set 5 min before the backup time — **required** for overnight backups when the Mac sleeps. If the backup time changes later, the row shows the old wake time and the button reads **Update** |
 | **🚀 Open at login (menu bar only)** | Installs a LaunchAgent that opens the app with `--background` at login — menu-bar icon only, no window and no dock tile (see *Starting at login* below) |
 | **🌐 Network trigger** | Label showing whether the network-reconnect trigger loaded successfully |
 
