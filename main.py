@@ -18,6 +18,7 @@ import fcntl
 import glob
 import json
 import os
+import plistlib
 import re
 import shutil
 import subprocess
@@ -2632,9 +2633,95 @@ class LabHealthCard(Card):
 # ----------------------------------------------------------------------------
 # Time Machine card
 # ----------------------------------------------------------------------------
+TM_SETTINGS_URL = "x-apple.systempreferences:com.apple.Time-Machine-Settings.extension"
+
+
+def _read_plist(text):
+    try:
+        data = plistlib.loads(text.encode())
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def tm_has_destination(destinationinfo_xml):
+    """`tmutil destinationinfo -X` -> whether any backup disk is configured.
+
+    Unparseable output counts as configured: better to offer a backup that
+    fails visibly than to claim Time Machine is off when we just can't tell.
+    """
+    data = _read_plist(destinationinfo_xml)
+    if data is None:
+        return True
+    return bool(data.get("Destinations"))
+
+
+def parse_tm_status(status_xml):
+    """`tmutil status -X` -> (running, phase, percent 0-100 or None).
+
+    Read the plist, never the text form: the text form prints `Running = 0;`
+    when idle, so looking for the word "Running" reports a backup forever.
+    """
+    data = _read_plist(status_xml) or {}
+    running = bool(data.get("Running"))
+    if not running:
+        return False, None, None
+    phase = data.get("BackupPhase")
+    pct = (data.get("Progress") or {}).get("Percent", data.get("Percent"))
+    try:
+        pct = float(pct)
+    except (TypeError, ValueError):
+        pct = None
+    percent = round(pct * 100) if pct is not None and 0 <= pct <= 1 else None
+    return True, phase, percent
+
+
+def describe_tm_latest(stdout, stderr):
+    """`tmutil latestbackup` -> the text after "Last backup: ".
+
+    tmutil exits 0 even when it cannot answer, and puts the reason on stderr —
+    usually that the backup disk is not plugged in, which is not "no backups".
+    """
+    path = stdout.strip()
+    if not path:
+        if "mount" in stderr.lower():
+            return "unknown — backup disk not connected"
+        return "none found"
+    name = Path(path).name
+    stamp = name.removesuffix(".backup").removesuffix(".inprogress")
+    try:
+        return datetime.strptime(stamp, "%Y-%m-%d-%H%M%S").strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        return name
+
+
+def tm_start_backup(parent):
+    """Ask Time Machine to back up; say why not when it can't.
+
+    `tmutil startbackup` exits 0 silently with no disk configured, so the
+    destination has to be checked first or the request looks like it worked.
+    """
+    _, dest_xml, _ = run_cmd(["tmutil", "destinationinfo", "-X"], timeout=10)
+    if not tm_has_destination(dest_xml):
+        choice = QMessageBox.question(
+            parent, "Time Machine",
+            "Time Machine has no backup disk set up on this Mac.\n\n"
+            "Open Time Machine settings to choose one?",
+        )
+        if choice == QMessageBox.StandardButton.Yes:
+            run_cmd(["open", TM_SETTINGS_URL])
+        return False
+    rc, _, err = run_cmd(["tmutil", "startbackup"], timeout=10)
+    if rc != 0:
+        QMessageBox.warning(parent, "Time Machine",
+                            f"Could not start backup:\n{err.strip() or f'tmutil exited {rc}'}")
+        return False
+    return True
+
+
 class TimeMachineCard(Card):
     def __init__(self):
-        super().__init__("Time Machine", "Local snapshot backup status")
+        super().__init__("Time Machine", "Backups to your Time Machine disk")
 
         self.last_lbl = QLabel("Checking…")
         self.body(self.last_lbl)
@@ -2660,28 +2747,34 @@ class TimeMachineCard(Card):
         self._timer.start()
 
     def refresh(self):
-        # Last backup
-        rc, out, _ = run_cmd(["tmutil", "latestbackup"], timeout=10)
-        if rc == 0 and out.strip():
-            p = Path(out.strip())
-            self.last_lbl.setText(f"Last backup: {p.name}")
-        else:
-            self.last_lbl.setText("Last backup: none found")
+        _, dest_xml, _ = run_cmd(["tmutil", "destinationinfo", "-X"], timeout=10)
+        if not tm_has_destination(dest_xml):
+            self.last_lbl.setText("Time Machine is not set up — no backup disk chosen.")
+            self.status_lbl.setText("Status: off")
+            self.backup_btn.setText("Set up Time Machine…")
+            self.backup_btn.setEnabled(True)
+            return
+        self.backup_btn.setText("⏱ Back up now")
 
-        # Current status
-        rc2, out2, _ = run_cmd(["tmutil", "status"], timeout=10)
-        running = "Running" in out2 or "Backing Up" in out2
-        self.status_lbl.setText("Status: backing up now…" if running else "Status: idle")
+        _, out, err = run_cmd(["tmutil", "latestbackup"], timeout=10)
+        self.last_lbl.setText(f"Last backup: {describe_tm_latest(out, err)}")
+
+        _, status_xml, _ = run_cmd(["tmutil", "status", "-X"], timeout=10)
+        running, phase, percent = parse_tm_status(status_xml)
+        if running:
+            detail = ", ".join(str(x) for x in (phase, f"{percent} %" if percent is not None else None) if x)
+            self.status_lbl.setText(f"Status: backing up now…{f' ({detail})' if detail else ''}")
+        else:
+            self.status_lbl.setText("Status: idle")
         self.backup_btn.setEnabled(not running)
 
     def _start_backup(self):
-        rc, _, err = run_cmd(["tmutil", "startbackup"], timeout=10)
-        if rc != 0 and err:
-            QMessageBox.warning(self, "Time Machine", f"Could not start backup:\n{err}")
-        else:
+        if tm_start_backup(self):
             self.status_lbl.setText("Status: backup requested…")
             self.backup_btn.setEnabled(False)
             QTimer.singleShot(5000, self.refresh)
+        else:
+            self.refresh()
 
 
 # ----------------------------------------------------------------------------
@@ -2743,8 +2836,7 @@ class ToolsCard(Card):
             ("Backup logs", LOG_DIR),
             ("CloudStorage folder", CLOUD_DIR),
             ("iCloud Drive", ICLOUD_DIR),
-            ("Time Machine settings",
-             lambda: run_cmd(["open", "x-apple.systempreferences:com.apple.Time-Machine-Settings.extension"])),
+            ("Time Machine settings", lambda: run_cmd(["open", TM_SETTINGS_URL])),
         ]
         docs = [
             ("App guide (README)", lambda _=False, t="App Guide", p=app_dir / "README.md": self.open_doc(t, p)),
@@ -2764,8 +2856,7 @@ class ToolsCard(Card):
         extras = [
             ("Google Photos Takeout…", self._google_photos_help),
             ("Proton vault status", self._proton_vault_check),
-            ("Time Machine: back up now",
-             lambda: run_cmd(["tmutil", "startbackup"])),
+            ("Time Machine: back up now", lambda: tm_start_backup(self)),
         ]
 
         grid.addLayout(col("Open locations", locations), 0, 0)

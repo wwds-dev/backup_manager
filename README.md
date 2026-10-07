@@ -87,8 +87,17 @@ Rebuild a cleaned venv with `uv sync` or `pip install -r requirements.txt`.
 ---
 
 ### Time Machine
-Last snapshot timestamp, idle/running status, and a **⏱ Back up now** button.
-Refreshes every 5 minutes alongside the other cards.
+Last backup date, idle/running status (with phase and percent while running), and a
+**⏱ Back up now** button. Refreshes every 5 minutes alongside the other cards.
+
+- With no backup disk chosen, the card says Time Machine is not set up and the button
+  becomes **Set up Time Machine…**. `tmutil startbackup` exits 0 silently in that
+  state, so the destination is checked first; otherwise "backup requested" would be a lie.
+- When the disk is not plugged in, the last backup reads *unknown — backup disk not
+  connected* rather than *none found*: `tmutil latestbackup` cannot see past an
+  unmounted disk and reports that on stderr with exit code 0.
+- Status comes from `tmutil status -X` (a plist), never the text form, which prints
+  `Running = 0;` when idle.
 
 ---
 
