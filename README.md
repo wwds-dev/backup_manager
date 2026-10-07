@@ -71,7 +71,10 @@ last 60 lines of the most recent run so status is visible without triggering a n
 Add or remove folders from the rsync job (confirmation required before removal), edit
 rsync exclude patterns, and see the total local size of the backup set.
 
-- A table of **Folder · Last synced · Size**: the last-synced time is scanned from the most recent logs (amber "never synced" if a folder has no OK line yet), and the size is each folder's local `du`, filled in once the scan finishes.
+- A table of **Folder · Last synced · Size**: the folder's full path, the last-synced
+  time scanned from the most recent logs (amber "never synced" if a folder has no OK
+  line yet), and its local `du` size, filled in once the scan finishes.
+- **Double-click a folder** (or right-click → Open in Finder) to open it.
 - **Right-click any folder** → "Back up now" runs rsync for just that one folder — no
   need to wait for the full nightly run after a large edit.
 - **Exclude patterns → 🔍 Preview matches** — runs `find` against your backed-up folders
@@ -87,6 +90,11 @@ Table of every project in `lab/active/` with total size, reclaimable space (`.ve
 - **🧹 Clean up checked** — deletes reclaimable folders after a confirmation dialog
 - **🔄 Rescan** — refreshes the table (also runs at launch and on Refresh all)
 - **Right-click any row** → Open in Finder or Open in Terminal
+
+**Column widths (both tables).** Drag a header border to resize a column. Until you
+do, the columns fit the window by themselves; once you have, your widths stay put
+through refreshes and relaunches (kept in `state.json`). Right-click the header →
+**Fit columns to window** to go back to automatic.
 
 Rebuild a cleaned venv with `uv sync` or `pip install -r requirements.txt`.
 

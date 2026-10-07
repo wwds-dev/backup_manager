@@ -37,7 +37,7 @@ if "--run-backup" in sys.argv:
 import signal as _signal
 from PySide6.QtCore import (
     Qt, QThread, Signal, QProcess, QTimer, QProcessEnvironment, QEvent,
-    QFileSystemWatcher, QPointF, QRect, QSize, QPoint,
+    QFileSystemWatcher, QPointF, QRect, QSize, QPoint, QObject,
 )
 from PySide6.QtGui import QTextCursor, QColor, QIcon, QPixmap, QPainter, QPen, QPolygonF
 from PySide6.QtNetwork import QNetworkInformation
@@ -958,6 +958,29 @@ def _get_quota_history(account_key: str) -> list:
 # ----------------------------------------------------------------------------
 # Background worker for folder sizes (keeps UI responsive)
 # ----------------------------------------------------------------------------
+_retired_workers = set()
+
+
+def replace_worker(old, new):
+    """Start `new`; keep a still-running `old` alive until it finishes.
+
+    Dropping the last reference to a running QThread aborts the whole app
+    ("QThread: Destroyed while thread is still running"), and assigning a new
+    scan over one still in flight does exactly that — Refresh all, or adding
+    a folder during a long size scan. The superseded scan is also cut off from
+    its slot, so its stale result cannot land on top of the new one.
+    """
+    if old is not None and old.isRunning():
+        try:
+            old.done.disconnect()
+        except (RuntimeError, TypeError):
+            pass
+        _retired_workers.add(old)
+        old.finished.connect(lambda w=old: _retired_workers.discard(w))
+    new.start()
+    return new
+
+
 class SizeWorker(QThread):
     done = Signal(dict, str)  # {folder: size}, total_str
 
@@ -2432,12 +2455,11 @@ class FoldersCard(Card):
         # only line up when they sit in a column of their own.
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["Folder", "Last synced", "Size"])
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.table.horizontalHeaderItem(2).setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.columns = ResizableColumns(self.table, "folders", self._fit_columns)
+        self.table.setToolTip("Double-click a folder to open it in Finder")
+        self.table.cellDoubleClicked.connect(lambda r, _c: self._open_folder(self._folder_at(r)))
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QTableWidget.SingleSelection)
@@ -2473,9 +2495,8 @@ class FoldersCard(Card):
         folders = read_folders()
         self.table.setRowCount(len(folders))
         for r, f in enumerate(folders):
-            name = QTableWidgetItem(f)
+            name = QTableWidgetItem(str(DOCS / f))
             name.setData(Qt.UserRole, f)
-            name.setToolTip(str(DOCS / f))
             self.table.setItem(r, 0, name)
             last = sync_times.get(f)
             synced = QTableWidgetItem(last[:16] if last else "never synced")
@@ -2486,17 +2507,34 @@ class FoldersCard(Card):
             size.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.table.setItem(r, 2, size)
         fit_height_to_rows(self.table)
+        self.columns.fit()
         self.total_lbl.setText("Backup set size: calculating…")
-        self.worker = SizeWorker(folders)
-        self.worker.done.connect(self._show_sizes)
-        self.worker.start()
+        worker = SizeWorker(folders)
+        worker.done.connect(self._show_sizes)
+        self.worker = replace_worker(getattr(self, "worker", None), worker)
 
     def _show_sizes(self, sizes, total):
         for r in range(self.table.rowCount()):
             item = self.table.item(r, 2)
             if item is not None:
                 item.setText(sizes.get(self._folder_at(r), "?"))
+        self.columns.fit()
         self.total_lbl.setText(f"Backup set size (local originals): {total}")
+
+    def _fit_columns(self):
+        # Date and size take what they need; the path gets the rest of the row.
+        t = self.table
+        t.resizeColumnToContents(1)
+        # Not resizeColumnToContents(2): the last column is stretched to the
+        # table's edge, so its current width is not what it needs.
+        size_w = max(t.sizeHintForColumn(2), t.horizontalHeader().sectionSizeHint(2))
+        rest = t.viewport().width() - t.columnWidth(1) - size_w
+        t.setColumnWidth(0, max(rest, 200))
+
+    @staticmethod
+    def _open_folder(folder):
+        if folder:
+            run_cmd(["open", str(DOCS / folder)])
 
     def _folder_at(self, row):
         item = self.table.item(row, 0)
@@ -2541,9 +2579,12 @@ class FoldersCard(Card):
         if not folder:
             return
         menu = QMenu(self)
+        open_action = menu.addAction("📂 Open in Finder")
         backup_action = menu.addAction(f"▶ Back up '{folder}' now")
         action = menu.exec(self.table.viewport().mapToGlobal(pos))
-        if action == backup_action:
+        if action == open_action:
+            self._open_folder(folder)
+        elif action == backup_action:
             self.single_backup_requested.emit(folder)
 
     def edit_excludes(self):
@@ -2561,11 +2602,10 @@ class LabHealthCard(Card):
         self.table.setColumnCount(6)
         self.table.setHorizontalHeaderLabels(
             ["", "Project", "Total", "Reclaimable", "Git", "Manifest / .env"])
-        header = self.table.horizontalHeader()
-        for col in range(5):
-            header.setSectionResizeMode(col, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(5, QHeaderView.Stretch)
-        header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.columns = ResizableColumns(
+            self.table, "lab_health",
+            lambda: [self.table.resizeColumnToContents(c) for c in range(5)])
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.verticalHeader().setVisible(False)
@@ -2596,9 +2636,9 @@ class LabHealthCard(Card):
 
     def rescan(self):
         self.summary_lbl.setText("Scanning…")
-        self.worker = LabHealthWorker()
-        self.worker.done.connect(self._populate)
-        self.worker.start()
+        worker = LabHealthWorker()
+        worker.done.connect(self._populate)
+        self.worker = replace_worker(getattr(self, "worker", None), worker)
 
     def _populate(self, rows):
         self._rows = rows
@@ -2639,6 +2679,7 @@ class LabHealthCard(Card):
                 notes_item.setForeground(QColor("#d97706"))
             self.table.setItem(r, 5, notes_item)
         fit_height_to_rows(self.table)
+        self.columns.fit()
 
         n_reclaim = sum(1 for row in rows if row["reclaim_kb"] > 0)
         self.summary_lbl.setText(
@@ -3007,6 +3048,93 @@ def fit_height_to_rows(view, min_rows=1):
         h += view.horizontalScrollBar().sizeHint().height()
     view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
     view.setFixedHeight(h)
+
+
+class ResizableColumns(QObject):
+    """Table columns you can drag to size, fitted automatically until you do.
+
+    Until a border is dragged, `auto_fit` sizes the columns whenever the rows
+    or the table's width change. After that the user's widths stand, and are
+    kept in state.json so they survive a relaunch. Right-clicking the header
+    offers "Fit columns to window" to hand control back. The last column always
+    stretches to the table's edge.
+    """
+    STATE_KEY = "column_widths"
+
+    def __init__(self, table, name, auto_fit):
+        super().__init__(table)
+        self.table, self.name, self._auto_fit = table, name, auto_fit
+        self._fitting = False
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.Interactive)
+        header.setStretchLastSection(True)
+        header.setMinimumSectionSize(40)
+        header.setContextMenuPolicy(Qt.CustomContextMenu)
+        header.customContextMenuRequested.connect(self._header_menu)
+        header.sectionResized.connect(self._section_resized)
+        table.viewport().installEventFilter(self)
+
+        saved = _load_state().get(self.STATE_KEY, {}).get(name)
+        self.user_sized = isinstance(saved, list) and len(saved) == table.columnCount()
+        if self.user_sized:
+            self._fitting = True
+            for col, width in enumerate(saved[:-1]):
+                table.setColumnWidth(col, int(width))
+            self._fitting = False
+
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(400)
+        self._save_timer.timeout.connect(self.save)
+
+    def fit(self):
+        if self.user_sized:
+            return
+        self._fitting = True
+        try:
+            self._auto_fit()
+            # The stretched last column never shrinks below the width it had
+            # before stretching (100 px at creation), which pushed a narrow
+            # Size column past the table's edge. Floor it so the stretch decides.
+            header = self.table.horizontalHeader()
+            header.resizeSection(self.table.columnCount() - 1, header.minimumSectionSize())
+        finally:
+            self._fitting = False
+
+    def reset(self):
+        self.user_sized = False
+        state = _load_state()
+        state.get(self.STATE_KEY, {}).pop(self.name, None)
+        _save_state(state)
+        self.fit()
+
+    def save(self):
+        state = _load_state()
+        state.setdefault(self.STATE_KEY, {})[self.name] = [
+            self.table.columnWidth(c) for c in range(self.table.columnCount())]
+        _save_state(state)
+
+    def _section_resized(self, *_):
+        # Every width change we make is inside fit(); a stretch of the last
+        # section is the table resizing, not the user. Anything else is a drag.
+        if self._fitting or self.table.horizontalHeader().sectionResizeMode(0) != QHeaderView.Interactive:
+            return
+        if not (QApplication.mouseButtons() & Qt.LeftButton):
+            return
+        self.user_sized = True
+        self._save_timer.start()
+
+    def _header_menu(self, pos):
+        menu = QMenu(self.table)
+        fit_action = menu.addAction("Fit columns to window")
+        fit_action.setEnabled(self.user_sized)
+        if menu.exec(self.table.horizontalHeader().mapToGlobal(pos)) == fit_action:
+            self.reset()
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Resize:
+            self.fit()
+        return False
 
 
 class SmartScrollArea(QScrollArea):
