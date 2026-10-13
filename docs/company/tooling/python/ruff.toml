@@ -1,0 +1,7 @@
+# Conservative baseline: real bugs only. Widen the rule set later, one family at a time,
+# with the ratchet absorbing the new findings.
+line-length = 100
+extend-exclude = ["build", "dist", "dist.noindex", "_archive", "_to_delete", ".venv", "node_modules"]
+
+[lint]
+select = ["E4", "E7", "E9", "F", "B"]

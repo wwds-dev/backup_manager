@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Secrets and lint on staged files. Activate once per clone:  git config core.hooksPath .githooks
+set -uo pipefail
+status=0
+if command -v gitleaks >/dev/null 2>&1; then
+  gitleaks protect --staged --redact --config .gitleaks.toml || status=1
+else
+  echo "pre-commit: gitleaks not installed, secret scan skipped (brew install gitleaks)"
+fi
+py=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.py$' || true)
+if [ -n "$py" ] && command -v ruff >/dev/null 2>&1; then
+  echo "$py" | xargs ruff check --quiet || status=1
+fi
+exit $status

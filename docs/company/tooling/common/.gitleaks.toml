@@ -1,0 +1,11 @@
+title = "company baseline"
+
+[extend]
+useDefault = true
+
+# Allowlist entries need the owner's approval. Prefer rotating a leaked secret to allowlisting it.
+# (An empty [allowlist] table is rejected by current gitleaks, so none is declared.)
+#
+# [allowlist]
+# description = "why"
+# paths = ['''path/to/fixture''']

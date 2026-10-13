@@ -1,0 +1,12 @@
+# __DEPENDABOT_ECOSYSTEMS__: one block per ecosystem in use, each exactly:
+#   - package-ecosystem: pip        # or npm
+#     directory: "/"
+#     schedule:
+#       interval: weekly
+version: 2
+updates:
+__DEPENDABOT_ECOSYSTEMS__
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly

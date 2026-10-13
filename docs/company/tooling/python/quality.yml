@@ -1,0 +1,39 @@
+# Fill every __PLACEHOLDER__ from docs/company/app-context.md (see .claude/commands/harden.md).
+# __RUNNER__: macos-latest for macOS-only or native-Qt apps, else ubuntu-latest.
+# __INSTALL_CMD__ must also install coverage. __TEST_CMD__ must write coverage data, e.g.
+#   python -m coverage run --source=<pkg>,<pkg> -m pytest
+name: quality
+on:
+  push:
+  pull_request:
+
+env:
+  PYTHON_VERSION: "__PYTHON_VERSION__"
+
+jobs:
+  test:
+    runs-on: __RUNNER__
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install
+        run: __INSTALL_CMD__
+      - name: Tests with coverage
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: __TEST_CMD__
+      - name: Coverage floor
+        run: python -m coverage report --fail-under=__COV_FLOOR__
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install ruff
+      - name: Lint ratchet
+        run: python docs/company/tooling/ratchet.py ruff ruff check --no-cache --quiet --output-format=concise --exit-zero .

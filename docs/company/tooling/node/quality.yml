@@ -1,0 +1,21 @@
+name: quality
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "__NODE_VERSION__"
+          cache: npm
+      - run: npm ci
+      - name: Lint
+        run: npm run lint --if-present
+      - name: Types
+        run: __TYPECHECK_CMD__
+      - name: Tests
+        run: __TEST_CMD__
