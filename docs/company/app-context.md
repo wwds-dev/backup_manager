@@ -30,6 +30,7 @@ true. Agents treat the **Invariants** as hard rules.
 
 ## Invariants
 <things agents must never do or imply, e.g. "no real money", "no network calls", copy rules>
+- Start every background `QThread` with `start_thread()` (or `replace_worker()`) in `main.py`, never bare `.start()`: the keeper holds it until `finished`, so no owner (a tile deleted by refresh, a closed dialog) can destroy it mid-run. Never `QThread.terminate()`. Guarded by `tests/test_thread_lifetime.py`.
 
 ## Domain specialist
 None. For a regulated or expert domain (money, insurance, health, law, ...), name the key

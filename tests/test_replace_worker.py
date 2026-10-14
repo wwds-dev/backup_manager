@@ -55,15 +55,16 @@ def test_a_superseded_scan_is_kept_alive_and_its_result_dropped(qapp):
     new = SlowWorker("new", 0.05)
     new.done.connect(results.append)
     holder = main.replace_worker(holder, new)
+    old_id = id(old)
     del old
     gc.collect()  # the abort happened exactly here: last reference, thread still running
 
-    assert len(main._retired_workers) == 1
-    wait_for(qapp, lambda: not main._retired_workers and not holder.isRunning())
+    assert old_id in {id(t) for t in main._thread_keeper.threads}
+    wait_for(qapp, lambda: not main._thread_keeper.threads)
     qapp.processEvents()
 
     assert results == ["new"]
-    assert main._retired_workers == set()
+    assert main._thread_keeper.threads == set()
 
 
 def test_a_finished_scan_is_simply_replaced(qapp):
@@ -72,5 +73,6 @@ def test_a_finished_scan_is_simply_replaced(qapp):
 
     second = main.replace_worker(first, SlowWorker("b", 0))
     second.wait()
+    wait_for(qapp, lambda: not main._thread_keeper.threads)
 
-    assert main._retired_workers == set()
+    assert main._thread_keeper.threads == set()

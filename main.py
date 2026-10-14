@@ -960,27 +960,59 @@ def _get_quota_history(account_key: str) -> list:
 # ----------------------------------------------------------------------------
 # Background worker for folder sizes (keeps UI responsive)
 # ----------------------------------------------------------------------------
-_retired_workers = set()
+class _ThreadKeeper(QObject):
+    """Owns every background QThread from start() until it has finished.
+
+    A QThread must outlive its own run(). The owners here do not reliably: a
+    storage tile is deleted on every refresh with its iCloud/reconnect worker
+    still running, a dialog can be closed mid-OAuth, and the webhook thread
+    had no owner at all. Whichever way the last reference goes, Qt aborts the
+    process ("QThread: Destroyed while thread is still running") — and if the
+    only reference left is the bound `run` method PySide holds for the call,
+    it goes on the worker thread itself, as run() returns. Keeping one here
+    until `finished` makes every owner's reference optional. The keeper lives
+    on the GUI thread, so the queued `finished` releases the thread there.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self._by_id = {}
+
+    @property
+    def threads(self):
+        return set(self._by_id.values())
+
+    def start(self, thread):
+        # Keyed by id, and the slot captures only the key: a lambda holding
+        # the thread itself would be a cycle through its own connection, and
+        # QObject.sender() answers None for a Python slot in PySide 6.11.
+        key = id(thread)
+        self._by_id[key] = thread
+        thread.finished.connect(lambda key=key: self._release(key))
+        thread.start()
+        return thread
+
+    def _release(self, key):
+        self._by_id.pop(key, None)
+
+
+_thread_keeper = _ThreadKeeper()
+start_thread = _thread_keeper.start
 
 
 def replace_worker(old, new):
-    """Start `new`; keep a still-running `old` alive until it finishes.
+    """Start `new` in place of `old`, cutting a still-running `old` off its slot.
 
-    Dropping the last reference to a running QThread aborts the whole app
-    ("QThread: Destroyed while thread is still running"), and assigning a new
-    scan over one still in flight does exactly that — Refresh all, or adding
-    a folder during a long size scan. The superseded scan is also cut off from
-    its slot, so its stale result cannot land on top of the new one.
+    The superseded scan (Refresh all, or adding a folder during a long size
+    scan) stays alive in the keeper until it finishes, but its stale result
+    cannot land on top of the new one.
     """
     if old is not None and old.isRunning():
         try:
             old.done.disconnect()
         except (RuntimeError, TypeError):
             pass
-        _retired_workers.add(old)
-        old.finished.connect(lambda w=old: _retired_workers.discard(w))
-    new.start()
-    return new
+    return start_thread(new)
 
 
 class SizeWorker(QThread):
@@ -1224,7 +1256,7 @@ class StorageTile(QFrame):
         self.detail_lbl.setText("Opening browser — sign in and approve access…")
         self._worker = ConnectWorker(self.provider, self.account_key)
         self._worker.done.connect(self._reconnect_done)
-        self._worker.start()
+        start_thread(self._worker)
 
     def _reconnect_done(self, ok, err):
         if ok:
@@ -1375,7 +1407,7 @@ class ICloudTile(QFrame):
 
         self._worker = self._Worker()
         self._worker.done.connect(self._on_done)
-        self._worker.start()
+        start_thread(self._worker)
 
     def _on_done(self, size: int | None):
         bar_bg = "#48484A" if _DARK else "#E5E5EA"
@@ -1708,7 +1740,7 @@ class CloudAccountsDialog(QDialog):
         self.status_lbl.setText(f"Opening browser to connect {account_key} — sign in and approve access…")
         self.worker = ConnectWorker(provider, account_key)
         self.worker.done.connect(self._connect_finished)
-        self.worker.start()
+        start_thread(self.worker)
 
     def _connect_finished(self, ok, error):
         if ok:
@@ -1783,7 +1815,7 @@ class AddAccountDialog(QDialog):
         self.status_lbl.setText("Opening browser — sign in and approve access…")
         self.worker = ConnectWorker(provider, key)
         self.worker.done.connect(lambda ok, err: self._finished(ok, err, key, provider, label))
-        self.worker.start()
+        start_thread(self.worker)
 
     def _finished(self, ok, error, key, provider, label):
         if not ok:
@@ -2425,9 +2457,7 @@ class BackupStatusCard(Card):
                 except Exception:
                     pass
 
-        t = _WebhookThread(url, payload)
-        t.finished.connect(t.deleteLater)
-        t.start()
+        start_thread(_WebhookThread(url, payload))
 
     def _finished(self):
         was_dry = self._dry_run
