@@ -24,6 +24,7 @@ import shutil
 import subprocess
 import urllib.request
 
+import appkit_guard
 import lab_health
 import version
 from datetime import datetime
@@ -3789,6 +3790,11 @@ def main():
 
     global _DARK
     _DARK = _system_dark_mode()
+    # Before QApplication: without it, opening the menu bar icon's menu can
+    # abort the app on macOS 27 (see appkit_guard.py).
+    if not appkit_guard.install():
+        print("Backup Control Center: clickCount guard UNAVAILABLE — "
+              "the menu bar menu may abort the app", file=sys.stderr)
     app = QuitInterceptApp(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     if background:

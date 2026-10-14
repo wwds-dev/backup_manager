@@ -416,6 +416,15 @@ covered by `tests/test_verify.py` — but nothing in `main.py` calls it and ther
 no button or CLI flag that runs it today. Run it from a Python shell (`import verify`)
 or see the backlog below.
 
+## macOS 27 menu bar guard
+On macOS 27, opening the menu bar icon's menu could abort the app: Qt's cocoa plugin asks the
+current event for its `clickCount`, and macOS 27 raises for any event that is not a mouse event.
+`appkit_guard.py` makes `clickCount` answer 0 for those events (mouse events keep their real
+count). `main()` installs it before the `QApplication` is created, and prints a warning to stderr
+if it cannot. The code is a byte-identical copy of `lab_hub/ui/appkit_guard.py`;
+`tests/test_appkit_guard.py` fails when the two drift. Delete it with every other copy once Qt
+ships a fixed cocoa plugin.
+
 ## Tests
 
 ```bash
@@ -426,6 +435,8 @@ pytest
 source/dest tree (`tmp_path`), and `tests/test_overdue_cooldown.py` covers the
 overdue-notification cooldown persisted to `state.json` — both patch the real
 state file and secrets directory out so a test run never touches live app data.
+`tests/test_appkit_guard.py` runs against the real Objective-C runtime in a
+subprocess; its drift check needs the `lab_hub` checkout beside this one.
 
 ## Backlog
 - **Developer ID code signing** — eliminates the need to re-grant FDA after each rebuild
