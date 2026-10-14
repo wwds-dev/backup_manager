@@ -8,6 +8,7 @@
 
 ## v2 — current
 
+- [x] `P1` `bug` `@ai` **Lab Health follow-ups.** Commit selected acted on the stale `currentRow()` (it named the clean `shopfront`): it now uses the real selection, is disabled unless one dirty row is selected and names the project. Symlinked/out-of-tree projects (`altmerch_store`, `syndustryx`, 10 GB) are never ticked or cleaned, and cleanup refuses any path outside its project (`lab_health.cleanup_targets`). Checkbox column headed *Clean* with a tooltip; linked plain folders read grey. Tests in `tests/test_lab_health.py`.
 - [x] `P2` `feature` `@ai` Lab Health: Commit selected button (gitleaks-gated), per-project "don't warn about missing manifest", manifest warning only for Python projects, symlinked projects resolved (`lab_health.py`, `tests/test_lab_health.py`)
 - [x] `P1` `feature` `@ai` Backup pause / resume via SIGSTOP / SIGCONT
 - [x] `P1` `feature` `@ai` Tray icon badge when a backup is overdue

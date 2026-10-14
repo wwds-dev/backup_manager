@@ -1024,6 +1024,7 @@ class LabHealthWorker(QThread):
     @classmethod
     def _scan_project(cls, proj):
         link = proj
+        external = lab_health.is_external(link, LAB_ACTIVE)
         proj = proj.resolve()   # lab/active holds symlinks to out-of-tree projects
         total_kb = cls._size_kb(proj)
         reclaim_items = [(p, cls._size_kb(p)) for p in cls._find_disposable(proj)]
@@ -1059,6 +1060,7 @@ class LabHealthWorker(QThread):
             "last_commit": last_commit,
             "manifest": manifest,
             "env_flag": env_flag,
+            "external": external,
         }
 
     @staticmethod
@@ -2605,7 +2607,10 @@ class LabHealthCard(Card):
         self.table = QTableWidget()
         self.table.setColumnCount(6)
         self.table.setHorizontalHeaderLabels(
-            ["", "Project", "Total", "Reclaimable", "Git", "Manifest / .env"])
+            ["Clean", "Project", "Total", "Reclaimable", "Git", "Manifest / .env"])
+        self.table.horizontalHeaderItem(0).setToolTip(
+            "Tick to include this project in \u201cClean up checked\u201d. "
+            "This is not row selection: click a project name to select it.")
         self.table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.columns = ResizableColumns(
             self.table, "lab_health",
@@ -2627,6 +2632,9 @@ class LabHealthCard(Card):
         commit.setToolTip("Select a project with uncommitted changes, then commit it "
                           "(gitleaks scans the changes first). Right-click a row for more.")
         commit.clicked.connect(self._commit_selected)
+        commit.setEnabled(False)
+        self.commit_btn = commit
+        self.table.itemSelectionChanged.connect(self._update_commit_button)
         row.addWidget(rescan)
         row.addWidget(commit)
         row.addWidget(clean)
@@ -2656,28 +2664,37 @@ class LabHealthCard(Card):
         self.table.setRowCount(len(rows))
         total_reclaim_kb = 0
 
+        self.table.clearSelection()
         for r, row in enumerate(rows):
+            external = row.get("external", False)
             chk = QTableWidgetItem()
-            if row["reclaim_kb"] > 0:
-                chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
+            if row["reclaim_kb"] > 0 and not external:
+                chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
                 chk.setCheckState(Qt.Checked)
             else:
-                chk.setFlags(Qt.NoItemFlags)
+                chk.setFlags(Qt.ItemIsSelectable)
+            if external:
+                chk.setToolTip("Symlinked / outside lab/active: never cleaned from here. "
+                               "Clean it up in its own folder.")
             self.table.setItem(r, 0, chk)
 
-            self.table.setItem(r, 1, QTableWidgetItem(row["name"]))
+            name_item = QTableWidgetItem(f"{row['name']} ↗" if external else row["name"])
+            if external:
+                name_item.setToolTip(f"Linked project: {row['path']}")
+            self.table.setItem(r, 1, name_item)
             self.table.setItem(r, 2, QTableWidgetItem(human_size(row["total_kb"] * 1024)))
-            self.table.setItem(
-                r, 3, QTableWidgetItem(
-                    human_size(row["reclaim_kb"] * 1024) if row["reclaim_kb"] else "—"))
-            total_reclaim_kb += row["reclaim_kb"]
+            reclaim_text = human_size(row["reclaim_kb"] * 1024) if row["reclaim_kb"] else "—"
+            reclaim_item = QTableWidgetItem(
+                f"{reclaim_text} (linked, not cleaned)" if external and row["reclaim_kb"]
+                else reclaim_text)
+            if external and row["reclaim_kb"]:
+                reclaim_item.setForeground(QColor("#6b7280"))
+            self.table.setItem(r, 3, reclaim_item)
+            if not external:
+                total_reclaim_kb += row["reclaim_kb"]
 
-            if not row["has_git"]:
-                git_text, git_color = "no git repo", "#dc2626"
-            elif row["uncommitted"]:
-                git_text, git_color = f"{row['uncommitted']} uncommitted", "#d97706"
-            else:
-                git_text, git_color = f"clean ({row['last_commit']})", "#16a34a"
+            git_text, git_color = lab_health.git_label(
+                row["has_git"], row["uncommitted"], row["last_commit"], external)
             git_item = QTableWidgetItem(git_text)
             git_item.setForeground(QColor(git_color))
             self.table.setItem(r, 4, git_item)
@@ -2694,7 +2711,8 @@ class LabHealthCard(Card):
         fit_height_to_rows(self.table)
         self.columns.fit()
 
-        n_reclaim = sum(1 for row in rows if row["reclaim_kb"] > 0)
+        self._update_commit_button()
+        n_reclaim = sum(1 for row in rows if row["reclaim_kb"] > 0 and not row.get("external"))
         self.summary_lbl.setText(
             f"{human_size(total_reclaim_kb * 1024)} reclaimable across {n_reclaim} of "
             f"{len(rows)} projects"
@@ -2739,19 +2757,26 @@ class LabHealthCard(Card):
         elif action == term_action:
             subprocess.run(["open", "-a", "Terminal", str(project_path)])
 
+    def _selected_rows(self):
+        return sorted({i.row() for i in self.table.selectionModel().selectedRows()})
+
+    def _commit_target(self):
+        return lab_health.commit_target(self._rows, self._selected_rows())
+
+    def _update_commit_button(self):
+        info = self._commit_target()
+        self.commit_btn.setEnabled(info is not None)
+        self.commit_btn.setText(f"✅ Commit {info['name']}…" if info else "✅ Commit selected…")
+
     def _commit_selected(self):
-        r = self.table.currentRow()
-        if r < 0 or r >= len(self._rows):
-            QMessageBox.information(self, "Select a project", "Click a project row first.")
-        elif not self._rows[r]["uncommitted"]:
-            QMessageBox.information(self, "Nothing to commit",
-                                    f"{self._rows[r]['name']} has no uncommitted changes.")
-        else:
-            self.commit_project(self._rows[r])
+        info = self._commit_target()
+        if info is not None:
+            self.commit_project(info)
 
     def commit_project(self, info):
         text, ok = QInputDialog.getText(
             self, f"Commit {info['name']}",
+            f"Project: {info['name']}\n{info['path']}\n\n"
             f"{info['uncommitted']} changed file(s) will be staged, scanned with gitleaks "
             "and committed.\n\nCommit message:",
             text=f"{info['name']}: checkpoint {datetime.now():%Y-%m-%d}")
@@ -2765,12 +2790,12 @@ class LabHealthCard(Card):
         self.rescan()
 
     def clean_checked(self):
-        targets = []  # (project_name, path, kb)
-        for r, row in enumerate(self._rows):
+        checked = set()
+        for r in range(len(self._rows)):
             item = self.table.item(r, 0)
             if item and item.flags() & Qt.ItemIsUserCheckable and item.checkState() == Qt.Checked:
-                for p, kb in row["reclaim_items"]:
-                    targets.append((row["name"], p, kb))
+                checked.add(r)
+        targets = lab_health.cleanup_targets(self._rows, checked)  # skips linked projects
 
         if not targets:
             QMessageBox.information(

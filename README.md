@@ -87,10 +87,16 @@ rsync exclude patterns, and see the total local size of the backup set.
 Table of every project in `lab/active/` with total size, reclaimable space (`.venv`,
 `build`, `dist`, `__pycache__`, etc.), git status, and manifest/`.env` warnings.
 
-- **🧹 Clean up checked** — deletes reclaimable folders after a confirmation dialog
+- **🧹 Clean up checked** — deletes reclaimable folders in the rows ticked in the
+  **Clean** column, after a confirmation dialog. The tick box is not row selection.
+  Symlinked or out-of-tree projects (marked ↗, e.g. `altmerch_store`, `syndustryx`) are
+  never ticked and never cleaned from here: their reclaimable size shows as
+  "(linked, not cleaned)" and is left out of the total. Every deleted path must also lie
+  inside its own project.
 - **🔄 Rescan** — refreshes the table (also runs at launch and on Refresh all)
-- **✅ Commit selected…** — stages the selected project's changes, scans them with
-  gitleaks (a hit unstages everything and commits nothing) and commits with the message
+- **✅ Commit selected…** — enabled only while exactly one project with uncommitted
+  changes is selected (the button then reads *Commit <name>…* and the dialog names
+  the project and path). It stages that project's changes, scans them with gitleaks (a hit unstages everything and commits nothing) and commits with the message
   you confirm. Orange "N uncommitted" means unprotected work, since autosync is push-only.
 - **Right-click any row** → Open in Finder / Terminal; on a dirty repo also Commit changes
   and Show changes in Terminal; on a project with a manifest warning, *Don't warn about
@@ -98,7 +104,8 @@ Table of every project in `lab/active/` with total size, reclaimable space (`.ve
 - The manifest warning appears only for projects with Python code (looked for up to three
   levels down, skipping venvs and builds) and no `requirements.txt` / `pyproject.toml` /
   `setup.py` / `Pipfile` anywhere in that tree. Symlinked projects (`altmerch_store`,
-  `syndustryx`) are resolved to their real folder for size and git checks.
+  `syndustryx`) are resolved to their real folder for size and git checks; a linked
+  folder without git reads grey "plain folder" rather than red "no git repo".
 
 **Column widths (both tables).** Drag a header border to resize a column. Until you
 do, the columns fit the window by themselves; once you have, your widths stay put
