@@ -8,6 +8,7 @@
 
 ## v2 — current
 
+- [x] `P2` `feature` `@ai` Lab Health: Commit selected button (gitleaks-gated), per-project "don't warn about missing manifest", manifest warning only for Python projects, symlinked projects resolved (`lab_health.py`, `tests/test_lab_health.py`)
 - [x] `P1` `feature` `@ai` Backup pause / resume via SIGSTOP / SIGCONT
 - [x] `P1` `feature` `@ai` Tray icon badge when a backup is overdue
 - [x] `P2` `feature` `@ai` Restore last log scroll position on relaunch

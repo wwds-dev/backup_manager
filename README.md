@@ -89,7 +89,16 @@ Table of every project in `lab/active/` with total size, reclaimable space (`.ve
 
 - **🧹 Clean up checked** — deletes reclaimable folders after a confirmation dialog
 - **🔄 Rescan** — refreshes the table (also runs at launch and on Refresh all)
-- **Right-click any row** → Open in Finder or Open in Terminal
+- **✅ Commit selected…** — stages the selected project's changes, scans them with
+  gitleaks (a hit unstages everything and commits nothing) and commits with the message
+  you confirm. Orange "N uncommitted" means unprotected work, since autosync is push-only.
+- **Right-click any row** → Open in Finder / Terminal; on a dirty repo also Commit changes
+  and Show changes in Terminal; on a project with a manifest warning, *Don't warn about
+  missing manifest* (kept in `lab_health_ignore.json` beside `state.json`).
+- The manifest warning appears only for projects with Python code (looked for up to three
+  levels down, skipping venvs and builds) and no `requirements.txt` / `pyproject.toml` /
+  `setup.py` / `Pipfile` anywhere in that tree. Symlinked projects (`altmerch_store`,
+  `syndustryx`) are resolved to their real folder for size and git checks.
 
 **Column widths (both tables).** Drag a header border to resize a column. Until you
 do, the columns fit the window by themselves; once you have, your widths stay put

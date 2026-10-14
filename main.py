@@ -24,6 +24,7 @@ import shutil
 import subprocess
 import urllib.request
 
+import lab_health
 import version
 from datetime import datetime
 from pathlib import Path
@@ -47,7 +48,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit, QFrame, QScrollArea, QProgressBar,
     QGraphicsDropShadowEffect, QSizePolicy, QLineEdit, QFormLayout, QComboBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QSystemTrayIcon, QMenu, QCheckBox, QSpinBox,
-    QLayout, QAbstractScrollArea,
+    QLayout, QAbstractScrollArea, QInputDialog,
 )
 
 import cloud_quota
@@ -1022,6 +1023,8 @@ class LabHealthWorker(QThread):
 
     @classmethod
     def _scan_project(cls, proj):
+        link = proj
+        proj = proj.resolve()   # lab/active holds symlinks to out-of-tree projects
         total_kb = cls._size_kb(proj)
         reclaim_items = [(p, cls._size_kb(p)) for p in cls._find_disposable(proj)]
         reclaim_kb = sum(kb for _, kb in reclaim_items)
@@ -1035,7 +1038,7 @@ class LabHealthWorker(QThread):
                 ["git", "-C", str(proj), "log", "-1", "--format=%ad", "--date=short"], timeout=20)
             last_commit = out2.strip() or "—"
 
-        has_manifest = (proj / "requirements.txt").exists() or (proj / "pyproject.toml").exists()
+        manifest = lab_health.manifest_status(proj)
 
         env_flag = ""
         if (proj / ".env").exists():
@@ -1046,14 +1049,15 @@ class LabHealthWorker(QThread):
                 env_flag = ".env present (no git repo to check)"
 
         return {
-            "name": proj.name,
+            "name": link.name,
+            "path": str(proj),
             "total_kb": total_kb,
             "reclaim_kb": reclaim_kb,
             "reclaim_items": reclaim_items,
             "has_git": has_git,
             "uncommitted": uncommitted,
             "last_commit": last_commit,
-            "has_manifest": has_manifest,
+            "manifest": manifest,
             "env_flag": env_flag,
         }
 
@@ -2619,7 +2623,12 @@ class LabHealthCard(Card):
         rescan.clicked.connect(self.rescan)
         clean = secondary_button("🧹 Clean up checked")
         clean.clicked.connect(self.clean_checked)
+        commit = secondary_button("✅ Commit selected…")
+        commit.setToolTip("Select a project with uncommitted changes, then commit it "
+                          "(gitleaks scans the changes first). Right-click a row for more.")
+        commit.clicked.connect(self._commit_selected)
         row.addWidget(rescan)
+        row.addWidget(commit)
         row.addWidget(clean)
         row.addStretch()
         self.body(row)
@@ -2632,6 +2641,7 @@ class LabHealthCard(Card):
         self.body(hint)
 
         self._rows = []
+        self._ignored = set()
         self.rescan()
 
     def rescan(self):
@@ -2642,6 +2652,7 @@ class LabHealthCard(Card):
 
     def _populate(self, rows):
         self._rows = rows
+        self._ignored = lab_health.load_ignored()
         self.table.setRowCount(len(rows))
         total_reclaim_kb = 0
 
@@ -2671,7 +2682,9 @@ class LabHealthCard(Card):
             git_item.setForeground(QColor(git_color))
             self.table.setItem(r, 4, git_item)
 
-            notes = [] if row["has_manifest"] else ["⚠️ no requirements.txt / pyproject.toml"]
+            ignored = row["name"] in self._ignored
+            notes = ["⚠️ no requirements.txt / pyproject.toml"] \
+                if row["manifest"] == "missing" and not ignored else []
             if row["env_flag"]:
                 notes.append(row["env_flag"])
             notes_item = QTableWidgetItem("; ".join(notes) if notes else "—")
@@ -2691,15 +2704,65 @@ class LabHealthCard(Card):
         row = self.table.rowAt(pos.y())
         if row < 0 or row >= len(self._rows):
             return
-        project_path = LAB_ACTIVE / self._rows[row]["name"]
+        info = self._rows[row]
+        project_path = Path(info["path"])
         menu = QMenu(self)
         open_action = menu.addAction("📂 Open in Finder")
         term_action = menu.addAction("🖥 Open in Terminal")
+        commit_action = diff_action = ignore_action = None
+        if info["uncommitted"]:
+            menu.addSeparator()
+            commit_action = menu.addAction("✅ Commit changes…")
+            diff_action = menu.addAction("🔍 Show changes in Terminal")
+        if info["manifest"] == "missing":
+            menu.addSeparator()
+            ignored = info["name"] in self._ignored
+            ignore_action = menu.addAction(
+                "🔔 Warn about missing manifest again" if ignored
+                else "🔕 Don't warn about missing manifest")
         action = menu.exec(self.table.viewport().mapToGlobal(pos))
-        if action == open_action:
+        if action is None:
+            return
+        if action == commit_action:
+            self.commit_project(info)
+        elif action == diff_action:
+            subprocess.run(["osascript", "-e",
+                            f'tell application "Terminal" to do script '
+                            f'"cd \\"{project_path}\\" && git status -s && git diff --stat"',
+                            "-e", 'tell application "Terminal" to activate'])
+        elif action == ignore_action:
+            self._ignored ^= {info["name"]}
+            lab_health.save_ignored(self._ignored)
+            self._populate(self._rows)
+        elif action == open_action:
             subprocess.run(["open", str(project_path)])
         elif action == term_action:
             subprocess.run(["open", "-a", "Terminal", str(project_path)])
+
+    def _commit_selected(self):
+        r = self.table.currentRow()
+        if r < 0 or r >= len(self._rows):
+            QMessageBox.information(self, "Select a project", "Click a project row first.")
+        elif not self._rows[r]["uncommitted"]:
+            QMessageBox.information(self, "Nothing to commit",
+                                    f"{self._rows[r]['name']} has no uncommitted changes.")
+        else:
+            self.commit_project(self._rows[r])
+
+    def commit_project(self, info):
+        text, ok = QInputDialog.getText(
+            self, f"Commit {info['name']}",
+            f"{info['uncommitted']} changed file(s) will be staged, scanned with gitleaks "
+            "and committed.\n\nCommit message:",
+            text=f"{info['name']}: checkpoint {datetime.now():%Y-%m-%d}")
+        if not ok:
+            return
+        done, out = lab_health.commit_all(Path(info["path"]), text)
+        if done:
+            QMessageBox.information(self, "Committed", out.splitlines()[0] if out else "Done.")
+        else:
+            QMessageBox.warning(self, "Not committed", out)
+        self.rescan()
 
     def clean_checked(self):
         targets = []  # (project_name, path, kb)
