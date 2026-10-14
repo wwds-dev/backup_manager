@@ -970,8 +970,11 @@ class _ThreadKeeper(QObject):
     process ("QThread: Destroyed while thread is still running") — and if the
     only reference left is the bound `run` method PySide holds for the call,
     it goes on the worker thread itself, as run() returns. Keeping one here
-    until `finished` makes every owner's reference optional. The keeper lives
-    on the GUI thread, so the queued `finished` releases the thread there.
+    until `finished` makes every owner's reference optional.
+
+    Call start() from the GUI thread only: PySide runs the release lambda on
+    the thread that connected it, so a thread started from elsewhere would
+    never be released (a leak, not a crash). Every caller today is a widget.
     """
 
     def __init__(self):
