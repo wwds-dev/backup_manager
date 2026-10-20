@@ -84,15 +84,26 @@ rsync exclude patterns, and see the total local size of the backup set.
 ---
 
 ### Lab Health
-Table of every project in `lab/active/` with total size, reclaimable space (`.venv`,
-`build`, `dist`, `__pycache__`, etc.), git status, and manifest/`.env` warnings.
+Table of every project in `lab/active/` with total size, reclaimable space split into
+**Caches** and **Envs**, days idle, git status, and manifest/`.env` warnings. Git
+worktrees (`.git` as a file, e.g. `imprint-base`) count as git repos.
 
-- **🧹 Clean up checked** — deletes reclaimable folders in the rows ticked in the
-  **Clean** column, after a confirmation dialog. The tick box is not row selection.
+- **Caches** (`__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.cache`) —
+  regenerate by themselves, so they are always offered and are deleted permanently.
+- **Envs** (`.venv`, `venv`, `env`, `node_modules`, `build`, `dist`) — cost a rebuild, so
+  a project's envs are offered only when it has been **idle 30+ days** (`IDLE_DAYS` in
+  `lab_health.py`; last commit or newest source edit) **and** a lockfile or manifest says
+  how to rebuild (`uv sync`, `pip install -r requirements.txt`, `npm ci`, …). Otherwise the
+  cell shows 🔒 and a tooltip gives the reason. Envs go to the **Trash** (restore with Put
+  Back; the disk space is freed once you empty it). Only git-ignored folders are offered.
+- Nothing is ticked by default. **☑ Select all safe** ticks everything offered (click
+  again to clear). A ticked box turns its size and the project name **red** and the card
+  shows "Will delete: N MB in M folders"; grey = stays (locked or linked).
+- **🧹 Clean up checked** — acts on the ticked boxes after a confirmation dialog that
+  lists each folder and its rebuild command. Never touched: source code, git history,
+  uncommitted changes, `.env` files. The tick boxes are not row selection.
   Symlinked or out-of-tree projects (marked ↗, e.g. `altmerch_store`, `syndustryx`) are
-  never ticked and never cleaned from here: their reclaimable size shows as
-  "(linked, not cleaned)" and is left out of the total. Every deleted path must also lie
-  inside its own project.
+  never cleaned from here (greyed). Every deleted path must lie inside its own project.
 - **🔄 Rescan** — refreshes the table (also runs at launch and on Refresh all)
 - **✅ Commit selected…** — enabled only while exactly one project with uncommitted
   changes is selected (the button then reads *Commit <name>…* and the dialog names
