@@ -214,13 +214,20 @@ def test_card_starts_unticked_and_offers_only_eligible(card):
     assert card.table.item(1, 0).flags() & flag
     assert card.table.item(1, 0).checkState() == Qt.Unchecked     # nothing pre-ticked
     assert not card.table.item(1, 1).flags() & flag               # locked env
-    assert card.table.item(1, 1).text() == "\U0001F512"
-    assert "linked" in card.table.item(0, 4).text()
+    assert card.table.item(1, 1).text().startswith("\U0001F512")
+    assert "never cleaned" in card.table.item(0, 0).toolTip()
     assert "safe to clean now" in card.summary_lbl.text()
+    red = lambda i: i.foreground().color().name() == "#ef4444"  # noqa: E731
+    assert not red(card.table.item(1, 0)) and not red(card.table.item(1, 2))
     card.toggle_safe()
     assert card.table.item(1, 0).checkState() == Qt.Checked
+    assert red(card.table.item(1, 0)) and red(card.table.item(1, 2))   # will be deleted
+    assert not red(card.table.item(1, 1))                              # locked env stays
+    assert "Will delete" in card.ticked_lbl.text()
     card.toggle_safe()
     assert card.table.item(1, 0).checkState() == Qt.Unchecked
+    assert not red(card.table.item(1, 0)) and not red(card.table.item(1, 2))
+    assert card.ticked_lbl.text() == ""
 
 
 def test_git_label_plain_folder_not_red():
