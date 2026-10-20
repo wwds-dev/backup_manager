@@ -3,6 +3,7 @@ import os
 import subprocess
 
 import pytest
+from pathlib import Path
 
 import lab_health as lh
 
@@ -89,7 +90,7 @@ def card(qapp, monkeypatch):
 
 def _row(name, **kw):
     return {"name": name, "path": f"/x/{name}", "has_git": True, "uncommitted": 0,
-            "last_commit": "—", "total_kb": 1, "reclaim_kb": 0, "reclaim_items": [],
+            "last_commit": "—", "total_kb": 1, "reclaim_kb": 0, "items": [], "idle_days": 90,
             "manifest": "ok", "env_flag": "", "external": False, **kw}
 
 
@@ -115,7 +116,7 @@ def test_card_commit_button_follows_selection(card, monkeypatch):
     monkeypatch.setattr(card, "commit_project", lambda info: seen.append(info["name"]))
     card._commit_selected()
     assert seen == ["sonar"]
-    assert card.table.horizontalHeaderItem(0).text() == "Clean"
+    assert card.table.horizontalHeaderItem(0).text() == "Caches"
 
 
 # --- Cleanup never reaches into linked / out-of-tree projects -------------------
@@ -129,29 +130,97 @@ def test_is_external(tmp_path):
     assert lh.is_external(root / "linked", root)
 
 
+def _item(path, kind="env", eligible=True, kb=1, rebuild="uv sync"):
+    return {"path": path, "kb": kb, "kind": kind, "rebuild": rebuild,
+            "eligible": eligible, "reason": "" if eligible else "locked"}
+
+
 def test_cleanup_targets_skip_external_and_escapes(tmp_path):
     inside = tmp_path / "inside"; (inside / ".venv").mkdir(parents=True)
     outside = tmp_path / "outside"; (outside / ".venv").mkdir(parents=True)
     (inside / "build").symlink_to(outside / ".venv")   # link escaping the project
     rows = [
         _row("inside", path=str(inside), reclaim_kb=2,
-             reclaim_items=[(inside / ".venv", 1), (inside / "build", 1), (outside, 1)]),
+             items=[_item(inside / ".venv"), _item(inside / "build"), _item(outside)]),
         _row("syndustryx", path=str(outside), external=True, reclaim_kb=9,
-             reclaim_items=[(outside / ".venv", 9)]),
+             items=[_item(outside / ".venv")]),
     ]
-    targets = lh.cleanup_targets(rows, {0, 1})
-    assert [(n, p) for n, p, _ in targets] == [("inside", inside / ".venv")]
+    targets = lh.cleanup_targets(rows, {0, 1}, {0, 1})
+    assert [(t["project"], t["path"]) for t in targets] == [("inside", inside / ".venv")]
 
 
-def test_card_unticks_external_rows(card, monkeypatch):
+def test_cleanup_targets_split_by_ticked_column_and_eligibility(tmp_path):
+    proj = tmp_path / "p"; (proj / "__pycache__").mkdir(parents=True)
+    (proj / ".venv").mkdir(); (proj / "node_modules").mkdir()
+    rows = [_row("p", path=str(proj), items=[
+        _item(proj / "__pycache__", kind="junk", rebuild=None),
+        _item(proj / ".venv"),
+        _item(proj / "node_modules", eligible=False)])]
+    names = lambda t: sorted(x["path"].name for x in t)  # noqa: E731
+    assert names(lh.cleanup_targets(rows, {0}, set())) == ["__pycache__"]
+    assert names(lh.cleanup_targets(rows, set(), {0})) == [".venv"]   # locked env never
+    assert names(lh.cleanup_targets(rows, {0}, {0})) == [".venv", "__pycache__"]
+    assert lh.cleanup_targets(rows, set(), set()) == []
+
+
+def test_rebuild_command(tmp_path):
+    py = tmp_path / "py"; (py / ".venv").mkdir(parents=True)
+    assert lh.rebuild_command(py, py / ".venv") is None            # no manifest
+    (py / "requirements.txt").write_text("x")
+    assert lh.rebuild_command(py, py / ".venv") == "pip install -r requirements.txt"
+    (py / "uv.lock").write_text("")
+    assert lh.rebuild_command(py, py / ".venv") == "uv sync"
+    js = tmp_path / "js"; (js / "node_modules").mkdir(parents=True)
+    assert lh.rebuild_command(js, js / "node_modules") is None
+    (js / "package-lock.json").write_text("{}")
+    assert lh.rebuild_command(js, js / "node_modules") == "npm ci"
+
+
+def test_classify_item_idle_and_rebuild_gates(tmp_path):
+    proj = tmp_path / "p"; (proj / ".venv").mkdir(parents=True)
+    (proj / "pyproject.toml").write_text("")
+    junk = lh.classify_item(proj, proj / "__pycache__", 5, 0)
+    assert junk["kind"] == "junk" and junk["eligible"]              # safe even if active
+    assert not lh.classify_item(proj, proj / ".venv", 5, lh.IDLE_DAYS - 1)["eligible"]
+    assert not lh.classify_item(proj, proj / ".venv", 5, None)["eligible"]
+    assert lh.classify_item(proj, proj / ".venv", 5, lh.IDLE_DAYS)["eligible"]
+    (proj / "pyproject.toml").unlink()
+    locked = lh.classify_item(proj, proj / ".venv", 5, 365)
+    assert not locked["eligible"] and "rebuilt" in locked["reason"]
+
+
+def test_idle_days_ignores_caches_and_ds_store(tmp_path):
+    import os, time
+    proj = tmp_path / "p"; proj.mkdir()
+    src = proj / "a.py"; src.write_text("x")
+    now = time.time()
+    os.utime(src, (now - 40 * 86400, now - 40 * 86400))
+    (proj / ".DS_Store").write_text("x")
+    (proj / "__pycache__").mkdir(); (proj / "__pycache__" / "a.pyc").write_text("x")
+    assert lh.idle_days(proj, now) == 40
+    assert lh.idle_days(tmp_path / "empty", now) is None
+
+
+def test_card_starts_unticked_and_offers_only_eligible(card):
     from PySide6.QtCore import Qt
-    card._populate([_row("altmerch_store", has_git=False, external=True, reclaim_kb=5),
-                    _row("sonar", reclaim_kb=5)])
-    ext = card.table.item(0, 0)
-    assert not ext.flags() & Qt.ItemIsUserCheckable
-    assert "linked" in card.table.item(0, 3).text()
+    row = _row("sonar", reclaim_kb=6, items=[
+        _item(Path("/x/sonar/__pycache__"), kind="junk", kb=1, rebuild=None),
+        _item(Path("/x/sonar/.venv"), kb=5, eligible=False)])
+    ext = _row("altmerch_store", has_git=False, external=True, reclaim_kb=5,
+               items=[_item(Path("/x/alt/.venv"), kb=5)])
+    card._populate([ext, row])
+    flag = Qt.ItemIsUserCheckable
+    assert not card.table.item(0, 0).flags() & flag and not card.table.item(0, 1).flags() & flag
+    assert card.table.item(1, 0).flags() & flag
+    assert card.table.item(1, 0).checkState() == Qt.Unchecked     # nothing pre-ticked
+    assert not card.table.item(1, 1).flags() & flag               # locked env
+    assert card.table.item(1, 1).text() == "\U0001F512"
+    assert "linked" in card.table.item(0, 4).text()
+    assert "safe to clean now" in card.summary_lbl.text()
+    card.toggle_safe()
     assert card.table.item(1, 0).checkState() == Qt.Checked
-    assert "1 of 2" in card.summary_lbl.text()
+    card.toggle_safe()
+    assert card.table.item(1, 0).checkState() == Qt.Unchecked
 
 
 def test_git_label_plain_folder_not_red():

@@ -38,7 +38,7 @@ if "--run-backup" in sys.argv:
 
 import signal as _signal
 from PySide6.QtCore import (
-    Qt, QThread, Signal, QProcess, QTimer, QProcessEnvironment, QEvent,
+    Qt, QFile, QThread, Signal, QProcess, QTimer, QProcessEnvironment, QEvent,
     QFileSystemWatcher, QPointF, QRect, QSize, QPoint, QObject,
 )
 from PySide6.QtGui import QTextCursor, QColor, QIcon, QPixmap, QPainter, QPen, QPolygonF
@@ -135,10 +135,7 @@ DEST_ROOT = DRIVE_ROOT / "Backups" / "MacBook" / "Documents"
 LAB_ACTIVE = DOCS / "lab" / "active"
 # Same disposable-junk names as gdrive_backup_excludes.txt — if it's not worth
 # backing up, it's not worth keeping locally once the project is idle either.
-DISPOSABLE_DIR_NAMES = {
-    ".venv", "venv", "env", "__pycache__", ".pytest_cache", ".mypy_cache",
-    ".ruff_cache", "node_modules", ".cache", "dist", "build",
-}
+DISPOSABLE_DIR_NAMES = lab_health.DISPOSABLE_NAMES
 
 
 # ----------------------------------------------------------------------------
@@ -159,6 +156,7 @@ def build_app_style(dark: bool) -> str:
         acc_prs  = "#005EC7"
         sec_bg   = "#3A3A3C"   # systemFill (dark)
         sec_hov  = "#48484A"
+        sec_prs  = "#636366"
         inp_bg   = "#2C2C2E"
         inp_bdr  = "#48484A"
         inp_foc  = "#0A84FF"
@@ -187,6 +185,7 @@ def build_app_style(dark: bool) -> str:
         acc_prs  = "#005BC7"
         sec_bg   = "#E5E5EA"   # systemFill (light)
         sec_hov  = "#D1D1D6"
+        sec_prs  = "#AEAEB2"
         inp_bg   = "#FFFFFF"
         inp_bdr  = "#C6C6C8"
         inp_foc  = "#007AFF"
@@ -307,6 +306,9 @@ QPushButton[secondary="true"] {{
 QPushButton[secondary="true"]:hover {{
     background: {sec_hov};
 }}
+QPushButton[secondary="true"]:pressed {{
+    background: {sec_prs};
+}}
 QPushButton[secondary="true"]:disabled {{
     background: {dis_bg};
     color: {dis_fg};
@@ -365,6 +367,17 @@ QTableWidget::item {{
 QTableWidget::item:selected {{
     background: {sel_bg};
     color: {text};
+}}
+QTableWidget::indicator {{
+    width: 16px;
+    height: 16px;
+    border: 1.5px solid {sec};
+    border-radius: 4px;
+    background: transparent;
+}}
+QTableWidget::indicator:checked {{
+    background: {acc};
+    border-color: {acc};
 }}
 QHeaderView::section {{
     background: {hdr_bg};
@@ -1063,8 +1076,10 @@ class LabHealthWorker(QThread):
         external = lab_health.is_external(link, LAB_ACTIVE)
         proj = proj.resolve()   # lab/active holds symlinks to out-of-tree projects
         total_kb = cls._size_kb(proj)
-        reclaim_items = [(p, cls._size_kb(p)) for p in cls._find_disposable(proj)]
-        reclaim_kb = sum(kb for _, kb in reclaim_items)
+        idle = lab_health.idle_days(proj)
+        items = [lab_health.classify_item(proj, p, cls._size_kb(p), idle)
+                 for p in cls._find_disposable(proj)]
+        reclaim_kb = sum(i["kb"] for i in items)
 
         has_git = (proj / ".git").is_dir()
         uncommitted, last_commit = 0, "—"
@@ -1090,7 +1105,8 @@ class LabHealthWorker(QThread):
             "path": str(proj),
             "total_kb": total_kb,
             "reclaim_kb": reclaim_kb,
-            "reclaim_items": reclaim_items,
+            "items": items,
+            "idle_days": idle,
             "has_git": has_git,
             "uncommitted": uncommitted,
             "last_commit": last_commit,
@@ -1124,7 +1140,18 @@ class LabHealthWorker(QThread):
         rc, out, _ = run_cmd(args, timeout=60)
         if rc != 0:
             return []
-        return [Path(p) for p in out.splitlines() if p.strip()]
+        found = [Path(p) for p in out.splitlines() if p.strip()]
+        # Never offer tracked folders (a committed build/ or dist/): deleting
+        # them would show up as changes in the repo. In a git repo keep only
+        # git-ignored ones; without git, only names that are never source.
+        if (proj / ".git").is_dir():
+            kept = []
+            for d in found:
+                rc, _, _ = run_cmd(["git", "-C", str(proj), "check-ignore", "-q", str(d)], timeout=10)
+                if rc == 0:
+                    kept.append(d)
+            return kept
+        return [d for d in found if d.name not in {"build", "dist", "env"}]
 
 
 # ----------------------------------------------------------------------------
@@ -2639,16 +2666,22 @@ class LabHealthCard(Card):
         self.body(self.summary_lbl)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(6)
+        self.table.setColumnCount(8)
         self.table.setHorizontalHeaderLabels(
-            ["Clean", "Project", "Total", "Reclaimable", "Git", "Manifest / .env"])
+            ["Caches", "Envs", "Project", "Total", "Reclaimable", "Idle", "Git", "Manifest / .env"])
         self.table.horizontalHeaderItem(0).setToolTip(
-            "Tick to include this project in \u201cClean up checked\u201d. "
+            "Tick to delete this project's caches (__pycache__, .pytest_cache, …). "
+            "They regenerate by themselves, so this is always safe. "
             "This is not row selection: click a project name to select it.")
+        self.table.horizontalHeaderItem(1).setToolTip(
+            f"Tick to move this project's environments (.venv, node_modules, build, dist) to "
+            f"the Trash. Offered only when the project has been idle {lab_health.IDLE_DAYS}+ "
+            f"days and the environment can be rebuilt from a lockfile or manifest (\U0001F512 = "
+            f"not offered; hover for why).")
         self.table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.columns = ResizableColumns(
             self.table, "lab_health",
-            lambda: [self.table.resizeColumnToContents(c) for c in range(5)])
+            self._fit_columns)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.verticalHeader().setVisible(False)
@@ -2660,6 +2693,7 @@ class LabHealthCard(Card):
         row = QHBoxLayout()
         rescan = secondary_button("🔄 Rescan")
         rescan.clicked.connect(self.rescan)
+        self.rescan_btn = rescan
         clean = secondary_button("🧹 Clean up checked")
         clean.clicked.connect(self.clean_checked)
         commit = secondary_button("✅ Commit selected…")
@@ -2669,15 +2703,24 @@ class LabHealthCard(Card):
         commit.setEnabled(False)
         self.commit_btn = commit
         self.table.itemSelectionChanged.connect(self._update_commit_button)
+        select = secondary_button("☑ Select all safe")
+        select.setToolTip("Tick every cache and every environment that is offered "
+                          "(idle project, rebuildable). Click again to clear.")
+        select.clicked.connect(self.toggle_safe)
         row.addWidget(rescan)
         row.addWidget(commit)
+        row.addWidget(select)
         row.addWidget(clean)
         row.addStretch()
         self.body(row)
 
         hint = QLabel(
-            "Reclaimable = .venv, build, dist, __pycache__ and similar — git-ignored, "
-            "excluded from the Drive backup, and rebuildable with uv sync / pip install.")
+            "Nothing is ticked by default. Caches regenerate by themselves and are deleted "
+            "for good. Environments (.venv, node_modules, build, dist) go to the Trash and "
+            "are offered only for projects idle "
+            f"{lab_health.IDLE_DAYS}+ days that have a lockfile or manifest to rebuild from; "
+            "empty the Trash to free the space. Code, git history, uncommitted changes and "
+            ".env files are never touched.")
         hint.setObjectName("CardSubtitle")
         hint.setWordWrap(True)
         self.body(hint)
@@ -2686,52 +2729,108 @@ class LabHealthCard(Card):
         self._ignored = set()
         self.rescan()
 
+    def _fit_columns(self):
+        for c in range(7):
+            self.table.resizeColumnToContents(c)
+        for c in (0, 1):
+            self.table.setColumnWidth(c, max(self.table.columnWidth(c), 70))
+
     def rescan(self):
         self.summary_lbl.setText("Scanning…")
+        self.rescan_btn.setEnabled(False)
+        self.rescan_btn.setText("🔄 Scanning…")
         worker = LabHealthWorker()
         worker.done.connect(self._populate)
         self.worker = replace_worker(getattr(self, "worker", None), worker)
 
     def _populate(self, rows):
+        self.rescan_btn.setEnabled(True)
+        self.rescan_btn.setText("🔄 Rescan")
         self._rows = rows
         self._ignored = lab_health.load_ignored()
         self.table.setRowCount(len(rows))
         total_reclaim_kb = 0
 
         self.table.clearSelection()
+        safe_kb = 0
         for r, row in enumerate(rows):
             external = row.get("external", False)
-            chk = QTableWidgetItem()
-            if row["reclaim_kb"] > 0 and not external:
-                chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-                chk.setCheckState(Qt.Checked)
+            items = row["items"]
+            junk_kb = sum(i["kb"] for i in items if i["kind"] == "junk")
+            env_ok = [i for i in items if i["kind"] == "env" and i["eligible"]]
+            env_locked = [i for i in items if i["kind"] == "env" and not i["eligible"]]
+            env_kb = sum(i["kb"] for i in env_ok)
+
+            junk_chk = QTableWidgetItem()
+            if junk_kb > 0 and not external:
+                junk_chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                junk_chk.setCheckState(Qt.Unchecked)
+                junk_chk.setToolTip(f"Caches: {human_size(junk_kb * 1024)}. Regenerated "
+                                    f"automatically, deleted permanently.")
             else:
-                chk.setFlags(Qt.ItemIsSelectable)
+                junk_chk.setFlags(Qt.ItemIsSelectable)
+            env_chk = QTableWidgetItem()
+            if env_kb > 0 and not external:
+                env_chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                env_chk.setCheckState(Qt.Unchecked)
+                env_chk.setToolTip("\n".join(
+                    f"{i['path'].name}: {human_size(i['kb'] * 1024)}. Moved to Trash; "
+                    f"rebuild with: {i['rebuild']}" for i in env_ok))
+            else:
+                env_chk.setFlags(Qt.ItemIsSelectable)
+                if env_locked and not external:
+                    env_chk.setText("\U0001F512")
+                    env_chk.setToolTip("Not offered:\n" + "\n".join(
+                        f"{i['path'].name} ({human_size(i['kb'] * 1024)}): {i['reason']}"
+                        for i in env_locked))
             if external:
-                chk.setToolTip("Symlinked / outside lab/active: never cleaned from here. "
-                               "Clean it up in its own folder.")
-            self.table.setItem(r, 0, chk)
+                msg = ("Symlinked / outside lab/active: never cleaned from here. "
+                       "Clean it up in its own folder.")
+                junk_chk.setToolTip(msg)
+                env_chk.setToolTip(msg)
+            self.table.setItem(r, 0, junk_chk)
+            self.table.setItem(r, 1, env_chk)
 
             name_item = QTableWidgetItem(f"{row['name']} ↗" if external else row["name"])
             if external:
                 name_item.setToolTip(f"Linked project: {row['path']}")
-            self.table.setItem(r, 1, name_item)
-            self.table.setItem(r, 2, QTableWidgetItem(human_size(row["total_kb"] * 1024)))
-            reclaim_text = human_size(row["reclaim_kb"] * 1024) if row["reclaim_kb"] else "—"
-            reclaim_item = QTableWidgetItem(
-                f"{reclaim_text} (linked, not cleaned)" if external and row["reclaim_kb"]
-                else reclaim_text)
+            self.table.setItem(r, 2, name_item)
+            self.table.setItem(r, 3, QTableWidgetItem(human_size(row["total_kb"] * 1024)))
+
+            if not row["reclaim_kb"]:
+                reclaim_text = "—"
+            else:
+                env_all_kb = sum(i["kb"] for i in items if i["kind"] == "env")
+                parts = []
+                if junk_kb:
+                    parts.append(f"{human_size(junk_kb * 1024)} caches")
+                if env_all_kb:
+                    parts.append(f"{human_size(env_all_kb * 1024)} envs")
+                reclaim_text = " · ".join(parts)
+                if external:
+                    reclaim_text += " (linked, not cleaned)"
+            reclaim_item = QTableWidgetItem(reclaim_text)
             if external and row["reclaim_kb"]:
                 reclaim_item.setForeground(QColor("#6b7280"))
-            self.table.setItem(r, 3, reclaim_item)
+            self.table.setItem(r, 4, reclaim_item)
             if not external:
+                safe_kb += junk_kb + env_kb
                 total_reclaim_kb += row["reclaim_kb"]
+
+            idle = row.get("idle_days")
+            idle_item = QTableWidgetItem("—" if idle is None else f"{idle} d")
+            if idle is not None:
+                idle_item.setForeground(QColor(
+                    "#16a34a" if idle >= lab_health.IDLE_DAYS else "#d97706"))
+            idle_item.setToolTip("Days since the last commit or source-file edit. "
+                                 f"Environments are offered after {lab_health.IDLE_DAYS}.")
+            self.table.setItem(r, 5, idle_item)
 
             git_text, git_color = lab_health.git_label(
                 row["has_git"], row["uncommitted"], row["last_commit"], external)
             git_item = QTableWidgetItem(git_text)
             git_item.setForeground(QColor(git_color))
-            self.table.setItem(r, 4, git_item)
+            self.table.setItem(r, 6, git_item)
 
             ignored = row["name"] in self._ignored
             notes = ["⚠️ no requirements.txt / pyproject.toml"] \
@@ -2741,15 +2840,14 @@ class LabHealthCard(Card):
             notes_item = QTableWidgetItem("; ".join(notes) if notes else "—")
             if notes:
                 notes_item.setForeground(QColor("#d97706"))
-            self.table.setItem(r, 5, notes_item)
+            self.table.setItem(r, 7, notes_item)
         fit_height_to_rows(self.table)
         self.columns.fit()
 
         self._update_commit_button()
-        n_reclaim = sum(1 for row in rows if row["reclaim_kb"] > 0 and not row.get("external"))
         self.summary_lbl.setText(
-            f"{human_size(total_reclaim_kb * 1024)} reclaimable across {n_reclaim} of "
-            f"{len(rows)} projects"
+            f"{human_size(total_reclaim_kb * 1024)} reclaimable, "
+            f"{human_size(safe_kb * 1024)} of it safe to clean now"
         )
 
     def _context_menu(self, pos):
@@ -2823,44 +2921,80 @@ class LabHealthCard(Card):
             QMessageBox.warning(self, "Not committed", out)
         self.rescan()
 
-    def clean_checked(self):
-        checked = set()
+    def _ticked(self, col):
+        rows = set()
         for r in range(len(self._rows)):
-            item = self.table.item(r, 0)
+            item = self.table.item(r, col)
             if item and item.flags() & Qt.ItemIsUserCheckable and item.checkState() == Qt.Checked:
-                checked.add(r)
-        targets = lab_health.cleanup_targets(self._rows, checked)  # skips linked projects
+                rows.add(r)
+        return rows
+
+    def toggle_safe(self):
+        """Tick every offered cache and environment; if all are ticked, clear them."""
+        boxes = [self.table.item(r, c) for r in range(len(self._rows)) for c in (0, 1)]
+        boxes = [b for b in boxes if b and b.flags() & Qt.ItemIsUserCheckable]
+        state = Qt.Unchecked if boxes and all(
+            b.checkState() == Qt.Checked for b in boxes) else Qt.Checked
+        for b in boxes:
+            b.setCheckState(state)
+
+    def clean_checked(self):
+        targets = lab_health.cleanup_targets(   # skips linked projects and locked envs
+            self._rows, self._ticked(0), self._ticked(1))
+        junk = [t for t in targets if t["kind"] == "junk"]
+        envs = [t for t in targets if t["kind"] == "env"]
 
         if not targets:
             QMessageBox.information(
-                self, "Nothing to clean", "No checked projects have reclaimable space.")
+                self, "Nothing to clean",
+                "Nothing is ticked. Tick caches or environments in the table, or use "
+                "\u201cSelect all safe\u201d.")
             return
 
-        total_kb = sum(kb for _, _, kb in targets)
-        listing = "\n".join(f"  {name}/{p.name}  ({human_size(kb * 1024)})"
-                             for name, p, kb in targets[:20])
-        if len(targets) > 20:
-            listing += f"\n  … and {len(targets) - 20} more"
+        def listing(group, with_rebuild):
+            lines = [f"  {t['project']}/{t['path'].name}  ({human_size(t['kb'] * 1024)})"
+                     + (f"  \u2192 rebuild: {t['rebuild']}" if with_rebuild else "")
+                     for t in group[:12]]
+            if len(group) > 12:
+                lines.append(f"  \u2026 and {len(group) - 12} more")
+            return "\n".join(lines)
+
+        text = ""
+        if envs:
+            text += (f"Move {len(envs)} environment folders "
+                     f"({human_size(sum(t['kb'] for t in envs) * 1024)}) to the Trash:\n"
+                     f"{listing(envs, True)}\n\nThose projects won't run until you run the "
+                     "rebuild command. You can restore them from the Trash until you empty it, "
+                     "and the disk space is freed only then.\n\n")
+        if junk:
+            text += (f"Permanently delete {len(junk)} cache folders "
+                     f"({human_size(sum(t['kb'] for t in junk) * 1024)}):\n"
+                     f"{listing(junk, False)}\n\nThey are recreated automatically.\n\n")
+        text += "Source code, git history, uncommitted changes and .env files are not touched."
         answer = QMessageBox.question(
-            self, "Clean up disposable folders",
-            f"Delete these {len(targets)} folders, reclaiming "
-            f"{human_size(total_kb * 1024)}?\n\n{listing}\n\n"
-            "These are git-ignored and excluded from the Drive backup — rebuild with "
-            "uv sync / pip install -r requirements.txt when you next need them.",
-            QMessageBox.Yes | QMessageBox.Cancel,
-            QMessageBox.Cancel,
-        )
+            self, "Clean up", text, QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel)
         if answer != QMessageBox.Yes:
             return
 
-        errors = []
-        for name, p, _ in targets:
+        errors, trashed_kb = [], 0
+        for t in targets:
+            label = f"{t['project']}/{t['path'].name}"
             try:
-                shutil.rmtree(p)
+                if t["kind"] == "junk":
+                    shutil.rmtree(t["path"])
+                elif QFile.moveToTrash(str(t["path"])):
+                    trashed_kb += t["kb"]
+                else:
+                    errors.append(f"{label}: could not move to the Trash (left in place)")
             except Exception as e:
-                errors.append(f"{name}/{p.name}: {e}")
+                errors.append(f"{label}: {e}")
         if errors:
-            QMessageBox.warning(self, "Some deletions failed", "\n".join(errors))
+            QMessageBox.warning(self, "Some folders were not cleaned", "\n".join(errors))
+        if trashed_kb:
+            QMessageBox.information(
+                self, "Moved to the Trash",
+                f"{human_size(trashed_kb * 1024)} is in the Trash. Empty it to free the "
+                "disk space, or restore a folder with Put Back.")
         self.rescan()
 
 
