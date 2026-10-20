@@ -114,6 +114,10 @@ through refreshes and relaunches (kept in `state.json`). Right-click the header 
 
 Rebuild a cleaned venv with `uv sync` or `pip install -r requirements.txt`.
 
+The card's rules (manifest check, ignore list, linked-project detection, git label,
+cleanup targets, commit target, and the gitleaks-gated commit) live in `lab_health.py`,
+which imports no Qt, so `tests/test_lab_health.py` checks them without a window.
+
 ---
 
 ### Time Machine
@@ -340,7 +344,10 @@ cd ~/Documents/lab/active/backup_manager
 ./build_app.sh
 ```
 Builds `Backup Control Center.app` with PyInstaller and installs it to `/Applications`.
-Re-run after any change to `main.py` or `cloud_quota.py`, then re-grant Full Disk Access.
+Re-run after any change to the Python sources (`main.py`, `cloud_quota.py`, `lab_health.py`,
+`appkit_guard.py`, `version.py`), then re-grant Full Disk Access. The installed app runs
+the build stamped in `_build_info.json`, not the checkout: a fix committed after the last
+build is not in it until the next `./build_app.sh`.
 
 `assets/` holds the app icon source — `icon.iconset/`, the compiled `icon.icns`, and
 `make_icon.py` which regenerates both.
@@ -425,6 +432,20 @@ if it cannot. The code is a byte-identical copy of `lab_hub/ui/appkit_guard.py`;
 `tests/test_appkit_guard.py` fails when the two drift. Delete it with every other copy once Qt
 ships a fixed cocoa plugin.
 
+## Background threads
+Every background `QThread` (folder and Lab Health scans, the iCloud size scan, OAuth
+connects, the failure webhook) starts through `start_thread()` in `main.py`, never a bare
+`.start()`. A module-level keeper holds each thread from start until it emits `finished`.
+Without it, Qt aborts the whole app ("QThread: Destroyed while thread is still running")
+whenever the last reference goes while the thread runs: a storage tile deleted by a refresh
+with its scan in flight, a dialog closed mid-OAuth, or the webhook thread, which had no
+owner at all. `replace_worker()` uses the same keeper when a refresh supersedes a scan that
+is still running, and disconnects the old scan's result so it cannot overwrite the new one.
+
+Call `start_thread()` from the GUI thread only: the release runs on the thread that
+connected it, so a thread started elsewhere would never be released (a leak, not a crash).
+Never use `QThread.terminate()`. Reviewed in `docs/audit/qthread-lifetime-review.md`.
+
 ## Tests
 
 ```bash
@@ -437,6 +458,15 @@ overdue-notification cooldown persisted to `state.json` — both patch the real
 state file and secrets directory out so a test run never touches live app data.
 `tests/test_appkit_guard.py` runs against the real Objective-C runtime in a
 subprocess; its drift check needs the `lab_hub` checkout beside this one.
+`tests/test_thread_lifetime.py` runs each thread-lifetime case in a child interpreter,
+because the failure it guards against is SIGABRT and would otherwise take pytest down;
+`tests/test_replace_worker.py` covers a superseded scan being kept alive with its result
+dropped.
+
+The rest: `test_lab_health.py` (Lab Health rules in `lab_health.py`),
+`test_login_agent.py` (Open at login LaunchAgent), `test_tile_windows.py` (tiles never
+escape as windows), `test_resizable_columns.py`, `test_scroll_latching.py`,
+`test_time_machine.py` (`tmutil` parsing) and `test_wake_schedule.py` (`pmset` parsing).
 
 ## Backlog
 - **Developer ID code signing** — eliminates the need to re-grant FDA after each rebuild
@@ -447,7 +477,14 @@ subprocess; its drift check needs the `lab_hub` checkout beside this one.
   or a `--verify` CLI flag would make it reachable.
 
 ## Suggestions & roadmap
-See [SUGGESTIONS.md](SUGGESTIONS.md).
+See [SUGGESTIONS.md](SUGGESTIONS.md) and the backlog in [TODO.md](TODO.md).
+
+## How changes are made
+[AGENTS.md](AGENTS.md) sets the engineering process for agents working on this repo:
+define, architect, build, a separate read-only review, verify, document and release, with
+the owner as the only approver at each gate. App facts and invariants are in
+`docs/company/app-context.md`, specs in `docs/specs/`, review reports in `docs/audit/`,
+role playbooks in `docs/playbooks/`, and phase activity in `docs/company/activity.jsonl`.
 
 ## Version
 

@@ -54,6 +54,11 @@
   up. An existing login item is migrated on first launch and removed, since both would
   otherwise fire. `tests/test_login_agent.py`.
 
+- [ ] `P1` `infra` `@me` Rebuild and reinstall with `./build_app.sh`, then re-grant Full Disk Access: the installed v2.062 (`dfcfa24`) predates the QThread keeper (`a85f126`), so the webhook and tile-refresh abort is fixed in code only
+- [ ] `P3` `bug` `@ai` `replace_worker()` only disconnects a still-running scan; a `done` already queued can still land before the new result (deferred P3 in `docs/audit/qthread-lifetime-review.md`)
+- [ ] `P2` `docs` `@ai` Fill in `docs/company/app-context.md`: only Invariants is written; Product, Stack, Commands, hot spots, security surface and test bar are still placeholders
+- [ ] `P3` `docs` `@ai` Add a CHANGELOG: the AGENTS.md definition of done requires one and the repo has none
+
 ## v3 — blocked or deferred
 
 - [ ] `P1` `infra` `@me` **Developer ID code signing** — needs a paid Apple Developer account ($99/yr). Removes the Full Disk Access re-grant after every rebuild and makes the launchd fallback reliable. Cannot be done in code.
