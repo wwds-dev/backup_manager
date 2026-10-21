@@ -93,3 +93,17 @@ already carries it; out of scope either way).
    GitHub. Alternative: put `~/.ssh` in the bundle (needed only if other servers trust this
    key).
 5. **gh token:** recommended: never backed up; `gh auth login` on a new Mac.
+
+## Build and review (2026-10-21)
+
+Built in the lab root (`_Admin/backup/backup_secrets.sh`, `secret_name_patterns.txt`,
+`secret_paths.txt`, `purge_plaintext_secrets.sh`, step 5 of `backup_to_gdrive.sh`) and
+git_autosync (`restore-secrets.sh`; snapshots keep credential names out of `.git/objects`).
+Security review: no P0/P1, P2s fixed (`docs/audit/secrets-vault-security.md`). Tests: 198 in
+git_autosync, including the bundle against a fake home and crafted bundles.
+
+**Order for the owner:** (1) sign `opaque1337@proton.me` in to Proton Drive; (2) after the next
+daily run, check that `Vault/Credentials-Recovery/Mac-secrets/latest.tar.gz` exists (BCC's log
+says `SECRETS: OK`); (3) only then run `purge_plaintext_secrets.sh`, then `--apply`, then empty
+Drive's Trash; (4) rotate the keys listed in `TODO.md`. Until (1), the daily run reports
+`SECRETS: FAILED` and the old Google copies are the only copy of the secrets — do not purge first.
