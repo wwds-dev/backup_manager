@@ -6,6 +6,12 @@
 
 ---
 
+## Secrets vault (spec `docs/specs/secrets-vault.md`, approved 2026-10-21)
+
+- [ ] `P0` `security` `@me` **Rotate every key that sat in plaintext on Google Drive.** Names only, from `sentinel/.env`, `imprint/vidforge/.env` and Imprint's and Sentinel's app data (the values were never read into any file or log): `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `DEEPSEEK_API_KEY`, `KIMI_API_KEY`, `DASHSCOPE_API_KEY`, `HIBP_API_KEY`, `VIRUSTOTAL_API_KEY`, `IPINFO_API_KEY`, `ABUSEIPDB_API_KEY`. Rotate at each provider, then update `sentinel/.env`, `imprint/vidforge/.env` and the apps' Settings. (`imprint/.env` holds only two Higgsfield endpoint URLs, not keys.)
+- [ ] `P0` `security` `@me` **Sign `opaque1337@proton.me` in to the Proton Drive app**, so `backup_secrets.sh` finds its folder (it refuses the other two accounts).
+- [ ] `P1` `security` `@me` **Purge the old plaintext copies:** in Terminal, `~/Documents/lab/_Admin/backup/purge_plaintext_secrets.sh` (lists), then `--apply`, then empty the Trash at drive.google.com.
+
 ## v2 — current
 
 - [x] `P1` `feature` `@ai` **Lab Health cleanup made safe for regular use.** Caches (always safe, permanent delete) are split from Envs (`.venv`, `node_modules`, `build`, `dist`: Trash only, offered after 30 idle days and only with a lockfile/manifest to rebuild from). Nothing pre-ticked, *Select all safe*, red marking plus a "Will delete" total for ticked items, rebuild command per row, tracked folders never offered. Git worktrees (`.git` as a file: `imprint-base`, `imprint-deps`) are no longer reported as "no git repo". Tests in `tests/test_lab_health.py`; installed as v2.068.
