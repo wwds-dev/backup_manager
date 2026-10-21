@@ -1,6 +1,7 @@
 # Spec: secrets go to an encrypted vault, not to plaintext Google Drive
 
-Status: **Define + proposed Architect — waiting for the owner (GATE)**. Nothing built.
+Status: **Approved by the owner 2026-10-21**: vault on `opaque1337@proton.me`; rotate the keys;
+delete the old plaintext copies after a dry-run; no SSH key or gh token backup.
 Follows git_autosync's `full-mac-backup` and `restore-and-continue` (both released 2026-10-21),
 which left this as "item 4".
 
@@ -78,8 +79,10 @@ already carries it; out of scope either way).
 
 ## Decisions for the owner
 
-1. **Which Proton account holds the vault?** Two are mounted: `netrunner55555@proton.me` and
-   `sapio1337@proton.me`. Which one has `Vault/`, per `PROTON_VAULT.md`?
+1. **Which Proton account holds the vault?** Owner, 2026-10-21: **`opaque1337@proton.me`**.
+   It is not mounted on this Mac (only `netrunner55555` and `sapio1337` are), so the owner
+   signs it in to the Proton Drive app first; the script then finds
+   `~/Library/CloudStorage/ProtonDrive-opaque1337@proton.me-folder` and refuses any other.
 2. **Rotate the keys that were in Google Drive in plaintext?** Recommended: yes, every live key
    in the four `.env` files and Imprint's stored keys. Revocation is cheap, and Drive's history
    means they may have been readable for weeks. I list the key names; you rotate them at each

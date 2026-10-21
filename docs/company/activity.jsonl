@@ -2,3 +2,4 @@
 {"ts": "2026-10-14T03:03:04", "phase": "release", "state": "blocked", "spec": "appkit-click-guard"}
 {"ts": "2026-10-14T16:03:50", "phase": "release", "state": "done", "spec": "appkit-click-guard"}
 {"ts": "2026-10-21T23:30:51", "phase": "define", "state": "blocked", "spec": "secrets-vault"}
+{"ts": "2026-10-21T23:33:13", "phase": "define", "state": "done", "spec": "secrets-vault"}
