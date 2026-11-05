@@ -1,6 +1,5 @@
 # Backup Control Center
 
-![Screenshot](docs/screenshot.png)
 A PySide6 desktop app to monitor cloud storage and manage the custom Google Drive
 backup (the rsync job in `_Admin/backup/`).
 
