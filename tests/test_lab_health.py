@@ -590,8 +590,9 @@ def test_commit_warnings_mid_merge_and_detached(tmp_path):
 def test_commit_targets_all_dirty_selected_rows():
     rows = [_row("a", uncommitted=2), _row("b"), _row("c", uncommitted=1),
             _row("d", uncommitted=4, external=True), _row("e", has_git=False)]
-    assert [r["name"] for r in lh.commit_targets(rows, [0, 1, 2, 3, 4])] == ["a", "c"]
+    assert [r["name"] for r in lh.commit_targets(rows, [0, 1, 2, 3, 4])] == ["a", "c", "d"]
     assert lh.commit_targets(rows, []) == []
+    assert "outside lab/active" in lh.linked_warning("/elsewhere/d")
 
 
 def test_select_all_dirty_checkbox(card, monkeypatch):
@@ -611,9 +612,20 @@ def test_select_all_dirty_checkbox(card, monkeypatch):
 
 
 def test_select_all_dirty_explains_when_nothing_qualifies(card):
-    card._populate([_row("a"), _row("syndustryx", uncommitted=8, external=True)])
+    card._populate([_row("a"), _row("b")])
     assert not card.sel_dirty.isEnabled() and card.sel_dirty.text().endswith("(0)")
-    assert "syndustryx" in card.sel_dirty.toolTip() and "own folder" in card.sel_dirty.toolTip()
+    assert "No project" in card.sel_dirty.toolTip()
+
+
+def test_linked_projects_are_selectable_and_warned(card, monkeypatch):
+    card._populate([_row("a"), _row("syndustryx", uncommitted=8, external=True)])
+    assert card.sel_dirty.isEnabled() and card.sel_dirty.text().endswith("(1)")
+    card.sel_dirty.setChecked(True)
+    assert card._selected_rows() == [1] and card.commit_btn.isEnabled()
+    monkeypatch.setattr(lh, "commit_warnings", lambda p: [])
+    warn = card._commit_warnings(card._rows[1])
+    assert len(warn) == 1 and "Linked project" in warn[0]
+    assert card._commit_warnings(card._rows[0]) == []
 
 
 # --- Thresholds, largest folders, system caches --------------------------------

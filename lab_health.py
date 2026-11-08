@@ -174,10 +174,16 @@ def commit_warnings(proj: Path) -> list[str]:
 
 
 def commit_targets(rows: list[dict], selected: list[int]) -> list[dict]:
-    """Every selected row the Commit button can act on (a repo with changes)."""
+    """Every selected row the Commit button can act on (a repo with changes).
+    Linked projects count too; their commit dialog carries linked_warning()."""
     return [rows[i] for i in selected
-            if 0 <= i < len(rows) and rows[i].get("has_git") and rows[i].get("uncommitted")
-            and not rows[i].get("external")]
+            if 0 <= i < len(rows) and rows[i].get("has_git") and rows[i].get("uncommitted")]
+
+
+def linked_warning(path: str | Path) -> str:
+    """The commit warning every linked (symlinked / outside lab/active) project gets."""
+    return (f"Linked project: it lives at {path}, outside lab/active. If another tool or "
+            "session is working there, its unfinished changes would be committed too.")
 
 
 def is_external(link: Path, root: Path) -> bool:

@@ -1227,11 +1227,13 @@ class LabHealthWorker(QThread):
 
         manifest = lab_health.manifest_status(proj)
         warnings = []
-        if has_git and uncommitted and not external:
+        if has_git and uncommitted:
             try:
                 warnings = lab_health.commit_warnings(proj)
             except Exception:
                 warnings = []
+            if external:
+                warnings.insert(0, lab_health.linked_warning(proj))
 
         env_flag = ""
         if (proj / ".env").exists():
@@ -3220,7 +3222,7 @@ class LabHealthCard(Card):
 
     def _dirty_rows(self):
         return [i for i, r in enumerate(self._rows)
-                if r.get("has_git") and r.get("uncommitted") and not r.get("external")]
+                if r.get("has_git") and r.get("uncommitted")]
 
     def _toggle_dirty(self, on):
         self.table.blockSignals(True)
@@ -3247,14 +3249,11 @@ class LabHealthCard(Card):
         self.sel_dirty.setChecked(bool(dirty) and self._selected_rows() == dirty)
         self.sel_dirty.setEnabled(bool(dirty))
         self.sel_dirty.setText(f"Select all with uncommitted changes ({len(dirty)})")
-        linked = [r["name"] for r in self._rows
-                  if r.get("external") and r.get("has_git") and r.get("uncommitted")]
         self.sel_dirty.setToolTip(
-            "Selects every project that has uncommitted changes, so “Commit” acts "
-            "on all of them. Nothing is committed until you confirm." if dirty else
-            "No project here has uncommitted changes."
-            + (f" Linked projects ({', '.join(linked)}) are committed in their own folder, "
-               "not from this card." if linked else ""))
+            "Selects every project that has uncommitted changes, linked ones included, so "
+            "“Commit” acts on all of them. Nothing is committed until you confirm; "
+            "linked projects are flagged and need an extra confirmation." if dirty else
+            "No project here has uncommitted changes.")
         self.sel_dirty.blockSignals(False)
 
     def _commit_selected(self):
@@ -3264,8 +3263,13 @@ class LabHealthCard(Card):
         elif infos:
             self.commit_projects(infos)
 
-    def commit_project(self, info):
+    @staticmethod
+    def _commit_warnings(info):
         warn = lab_health.commit_warnings(Path(info["path"]))
+        return ([lab_health.linked_warning(info["path"])] if info.get("external") else []) + warn
+
+    def commit_project(self, info):
+        warn = self._commit_warnings(info)
         shown = ("\n\n\u26a0 Check before committing:\n\u2022 " + "\n\u2022 ".join(warn)) if warn else ""
         text, ok = QInputDialog.getText(
             self, f"Commit {info['name']}",
@@ -3290,7 +3294,7 @@ class LabHealthCard(Card):
     def commit_projects(self, infos):
         """Commit several projects, each with its own default message. Projects with
         warnings can be skipped, so one risky repo never rides along unseen."""
-        warned = {i["name"]: lab_health.commit_warnings(Path(i["path"])) for i in infos}
+        warned = {i["name"]: self._commit_warnings(i) for i in infos}
         risky = [i for i in infos if warned[i["name"]]]
         lines = []
         for i in infos:
