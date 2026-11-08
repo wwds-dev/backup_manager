@@ -476,8 +476,13 @@ QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QComboBox:disabl
     border: 1px solid {dis_bg};
 }}
 QSpinBox, QDoubleSpinBox {{
-    padding-left: 12px;
-    padding-right: 22px;
+    padding: 3px 22px 3px 10px;
+    min-height: 22px;
+    min-width: 96px;
+    max-width: 130px;
+}}
+QSpinBox:focus, QDoubleSpinBox:focus {{
+    padding: 2px 21px 2px 9px;
 }}
 QSpinBox QLineEdit, QDoubleSpinBox QLineEdit {{
     border: none;
@@ -2888,19 +2893,22 @@ class LabHealthCard(Card):
 
         lab_health.apply_settings(lab_health.load_settings())
         trow = QHBoxLayout()
-        trow.addWidget(QLabel("Offer a .venv / node_modules unused for"))
+        trow.setSpacing(10)
+        trow.addWidget(QLabel("Offer .venv / node_modules after"))
         self.env_days = make_spin()
         self.env_days.setRange(1, 365)
         self.env_days.setSuffix(" days")
         self.env_days.setValue(lab_health.ENV_IDLE_DAYS)
         trow.addWidget(self.env_days)
-        trow.addWidget(QLabel("; build / dist when the project is idle"))
+        trow.addWidget(QLabel("unused   ·   build / dist after the project is idle"))
         self.proj_days = make_spin()
         self.proj_days.setRange(1, 365)
         self.proj_days.setSuffix(" days")
         self.proj_days.setValue(lab_health.IDLE_DAYS)
         trow.addWidget(self.proj_days)
         trow.addStretch()
+        for sp in (self.env_days, self.proj_days):
+            sp.setFixedWidth(112)
         self.body(trow)
         self.env_days.editingFinished.connect(self._thresholds_changed)
         self.proj_days.editingFinished.connect(self._thresholds_changed)
