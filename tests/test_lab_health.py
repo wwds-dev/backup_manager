@@ -1,4 +1,5 @@
 """Lab Health helpers: manifest warning only where one is expected; safe commit."""
+import json
 import os
 import subprocess
 
@@ -187,12 +188,23 @@ def test_classify_item_idle_and_rebuild_gates(tmp_path):
     old, recent = now - (lh.ENV_IDLE_DAYS + 1) * 86400, now - 86400
     junk = lh.classify_item(proj, proj / "__pycache__", 5, 0)
     assert junk["kind"] == "junk" and junk["eligible"]              # safe even if active
-    venv = lambda **kw: lh.classify_item(proj, proj / ".venv", 5, 0, now=now, **kw)  # noqa: E731
-    # an env unused for a week is offered even though the project was active today
+    idle = lh.ENV_IDLE_DAYS
+    venv = lambda **kw: lh.classify_item(proj, proj / ".venv", 5, idle, now=now, **kw)  # noqa: E731
+    # the project's own root env counts as used while the project is active
+    own = lh.classify_item(proj, proj / ".venv", 5, 0, last_use=old, now=now)
+    assert not own["eligible"] and "project files edited" in own["reason"]
+    # any recent evidence (here: tests run) locks an env whose own files look old
+    ev = venv(last_use=old, evidence=[(recent, "tests run (.pytest_cache)")])
+    assert not ev["eligible"] and "tests run" in ev["reason"]
+    assert ev["last_use"] == recent and ev["last_use_source"].startswith("tests run")
+    # ...but a second env (worktree, sub-tool) unused for a week is offered anyway
+    extra = proj / ".claude" / "worktrees" / "w" / ".venv"; extra.mkdir(parents=True)
+    assert lh.classify_item(proj, extra, 5, 0, last_use=old, now=now)["eligible"]
     assert venv(last_use=old)["eligible"]
     r = venv(last_use=recent)
     assert not r["eligible"] and "used 1 day ago" in r["reason"]
-    assert not venv(last_use=None)["eligible"]
+    unknown = lh.classify_item(proj, proj / ".venv", 5, None, last_use=None, now=now)
+    assert not unknown["eligible"] and unknown["reason"] == "last use unknown"
     busy = venv(last_use=old, users=["running process python (pid 7)"])
     assert not busy["eligible"] and "in use" in busy["reason"] and "pid 7" in busy["reason"]
     # build/dist keep the project-idle rule
@@ -232,10 +244,204 @@ def test_env_users_process_launchd_and_app(tmp_path):
     assert any("com.x.script.plist" in u and "this project" in u for u in users)
     assert not any("unrelated" in u for u in users)
     assert "Sonar.app (launches from this checkout)" in users and len(users) == 5
-    # node_modules is not what Lab Hub apps launch, and a project script is not its user
+    # the root node_modules of an app's checkout is locked too (its server runs from it)
     nm = proj / "node_modules"; nm.mkdir()
-    assert lh.env_users(nm, proj, [], jobs, apps) == []
+    assert any("Sonar.app" in u for u in lh.env_users(nm, proj, [], {}, apps))
+    sub = proj / "web" / "node_modules"; sub.mkdir(parents=True)
+    assert lh.env_users(sub, proj, [], jobs, apps) == []
     assert lh.env_users(other, other.parent, procs[:3], jobs, apps) == []
+
+
+def test_never_offer_self_hub_and_bundle_envs(tmp_path):
+    proj = tmp_path / "imprint"; env = proj / ".venv"; (env / "bin").mkdir(parents=True)
+    # the running app's own interpreter
+    assert any("this app" in u for u in lh.env_users(env, proj, self_paths=[str(env.resolve())]))
+    # a Lab Hub app run from source; one that runs a built bundle does not count
+    hub = [{"key": "imprint", "name": "Imprint", "project": os.path.realpath(proj),
+            "from_source": True}]
+    assert lh.env_users(env, proj, hub=hub) == ["Lab Hub app Imprint runs from this checkout"]
+    assert lh.env_users(env, proj, hub=[{**hub[0], "from_source": False}]) == []
+    # a bundle whose launcher names the env, or a script in the checkout
+    assert lh.env_users(env, proj, bundles={"X": [f"{env}/bin/python"]}) == \
+        ["X.app names it in its launcher"]
+    assert lh.env_users(env, proj, bundles={"Y": [f"{proj}/main.py"]}) == \
+        ["Y.app launches from this checkout"]
+    # ...and classify_item never offers it, however idle
+    item = lh.classify_item(proj, env, 5, None, last_use=1.0, now=10**9,
+                            users=lh.env_users(env, proj, hub=hub))
+    (proj / "requirements.txt").write_text("x")
+    item = lh.classify_item(proj, env, 5, None, last_use=1.0, now=10**9,
+                            users=lh.env_users(env, proj, hub=hub))
+    assert not item["eligible"] and "Lab Hub app Imprint" in item["reason"]
+
+
+def test_lab_hub_apps_and_bundle_references(tmp_path):
+    toml = tmp_path / "lab_hub" / "lab_hub" / "apps.toml"; toml.parent.mkdir(parents=True)
+    toml.write_text('[[suites]]\nkey="imprint"\nname="Imprint"\nproject="imprint"\n'
+                    'entry="main.py"\n\n[[suites]]\nkey="s"\nname="S"\nproject="s"\n'
+                    'entry="x.py"\nruns_from_source=false\n')
+    apps = lh.lab_hub_apps(tmp_path)
+    assert [(a["key"], a["from_source"]) for a in apps] == [("imprint", True), ("s", False)]
+    assert apps[0]["project"] == os.path.realpath(tmp_path / "imprint")
+    assert lh.lab_hub_apps(tmp_path / "none") == []
+    macos = tmp_path / "Apps" / "X.app" / "Contents" / "MacOS"; macos.mkdir(parents=True)
+    (macos / "X").write_text('#!/bin/sh\nexec "/Users/me/lab/x/.venv/bin/python" main.py\n')
+    assert lh.bundle_references(tmp_path / "Apps") == {"X": ["/Users/me/lab/x/.venv/bin/python"]}
+
+
+def test_use_evidence_sources(tmp_path):
+    proj = tmp_path / "sonar"; env = proj / ".venv"; env.mkdir(parents=True)
+    (proj / "pkg" / "__pycache__").mkdir(parents=True)
+    pyc = proj / "pkg" / "__pycache__" / "a.cpython-311.pyc"; pyc.write_text("")
+    os.utime(pyc, (500, 500))
+    inside = env / "lib" / "__pycache__"; inside.mkdir(parents=True)     # env's own: ignored
+    (inside / "z.pyc").write_text(""); os.utime(inside / "z.pyc", (900, 900))
+    (proj / ".pytest_cache" / "v").mkdir(parents=True)
+    (proj / ".pytest_cache" / "v" / "x").write_text(""); os.utime(proj / ".pytest_cache" / "v" / "x", (600, 600))
+    (proj / "logs").mkdir(); (proj / "logs" / "app.log").write_text("")
+    os.utime(proj / "logs" / "app.log", (700, 700))
+    usage = {"hub_logs": {os.path.realpath(proj): 800.0},
+             "history": [(850.0, "cd ~/Documents/lab/active/sonar && python main.py"),
+                         (999.0, "cd sonar-old")]}
+    ev = dict((label, t) for t, label in lh.use_evidence(env, usage))
+    assert ev["Python bytecode compiled from its sources"] == 500
+    assert ev["tests run (.pytest_cache)"] == 600 and ev["log file written"] == 700
+    assert ev["launched from Lab Hub"] == 800 and ev["named in shell history"] == 850
+    assert lh.use_evidence(env, usage)[0] == (850.0, "named in shell history")
+
+
+def test_shell_history_and_launch_times(tmp_path):
+    z = tmp_path / ".zsh_history"
+    z.write_text(": 1700000000:0;cd /p/sonar\n" + "old\n" * 400 + "cd /p/imprint\n")
+    os.utime(z, (1800000000, 1800000000))
+    h = lh.shell_history([z, tmp_path / "missing"])
+    assert (1700000000.0, "cd /p/sonar") in h and (1800000000.0, "cd /p/imprint") in h
+    assert len(h) == 1 + lh.HISTORY_RECENT_LINES          # untimestamped: only the tail
+    log = tmp_path / "lab-hub-launch-sonar.log"; log.write_text(""); os.utime(log, (42, 42))
+    assert lh.lab_hub_launch_times([{"key": "sonar", "project": "/p/sonar"},
+                                    {"key": "none", "project": "/p/x"}], tmp_path) == \
+        {"/p/sonar": 42}
+
+
+def test_recall_use_survives_cache_cleanup(tmp_path):
+    env = tmp_path / ".venv"; mem = {}
+    assert lh.recall_use(env, [(500.0, "tests run")], mem)[0] == (500.0, "tests run")
+    later = lh.recall_use(env, [], mem)                   # caches deleted since
+    assert later[0][0] == 500.0 and "earlier scan" in later[0][1]
+    f = tmp_path / "mem.json"; lh.save_use_memory(mem, f)
+    assert lh.load_use_memory(f) == mem and lh.load_use_memory(tmp_path / "no") == {}
+
+
+def test_rebuild_record_and_rebuild(tmp_path, monkeypatch):
+    proj = tmp_path / "imprint"; env = proj / ".venv"; (env / "bin").mkdir(parents=True)
+    (env / "pyvenv.cfg").write_text("home = /x\nversion_info = 3.11.15\n")
+    (proj / "pyproject.toml").write_text("")
+    monkeypatch.setattr(lh, "_uv", lambda: "/u/uv")
+    calls = []
+
+    class R:
+        def __init__(self, rc=0, out=""):
+            self.returncode, self.stdout, self.stderr = rc, out, ""
+
+    def run(argv, **kw):
+        calls.append((argv, kw.get("cwd")))
+        if argv[1:3] == ["pip", "freeze"]:
+            return R(0, "requests==2.31.0\n-e file:///x/imprint\nidna==3.6\n")
+        if argv[-2:] and "-r" in argv:
+            calls.append(("freeze-file", Path(argv[-1]).read_text()))
+        return R()
+    target = {"path": env, "project": "imprint", "rebuild": "uv sync", "kb": 10,
+              "last_use": 5.0, "last_use_source": "tests run"}
+    out = tmp_path / "records"
+    f = lh.write_rebuild_record(target, proj, out, runner=run, now=1000)
+    rec = json.loads(f.read_text())
+    assert rec["python"] == "3.11" and rec["freeze"][0] == "requests==2.31.0"
+    assert rec["kind"] == "python" and rec["rebuild"] == "uv sync"
+    assert lh.missing_env_records(out) == []              # env still there
+    import shutil
+    shutil.rmtree(env)                                    # (test fixture, not the app)
+    missing = lh.missing_env_records(out)
+    assert [m["env_path"] for m in missing] == [str(env)]
+    calls.clear()
+    ok, msg = lh.rebuild_from_record(missing[0], runner=run, now=2000)
+    assert ok and msg == "exact versions"
+    argvs = [c[0] for c in calls if c[0] != "freeze-file"]
+    assert argvs[0][:4] == ["/u/uv", "venv", "--allow-existing", "--python"]
+    assert "-r" in argvs[1] and argvs[2][-2:] == ["-e", str(proj)]   # editable from checkout
+    frozen = [c[1] for c in calls if c[0] == "freeze-file"][0]
+    assert "requests==2.31.0" in frozen and "idna==3.6" in frozen and "file://" not in frozen
+    assert json.loads(f.read_text())["rebuilt_at"] == 2000
+    # a failed rebuild is marked, reported, and offered again; nothing is removed
+    env.mkdir()
+    bad = lambda argv, **kw: R(1, "no network")  # noqa: E731
+    rec2 = {**missing[0], "failed": "x"}
+    ok, msg = lh.rebuild_from_record(rec2, runner=bad)
+    assert not ok and "no network" in msg and env.exists()
+    assert lh.rebuild_from_record({**rec2, "project_path": str(tmp_path / "gone")})[0] is False
+
+
+def test_record_lost_env(tmp_path, monkeypatch):
+    monkeypatch.setattr(lh, "_uv", lambda: "/u/uv")
+    proj = tmp_path / "sonar"; proj.mkdir(); (proj / "requirements.txt").write_text("x")
+    out = tmp_path / "rec"
+    f = lh.record_lost_env("sonar", proj, proj / ".venv", kb=9, python="3.11", out_dir=out)
+    rec = json.loads(f.read_text())
+    assert rec["rebuild"] == "pip install -r requirements.txt" and rec["freeze"] is None
+    assert [m["env_path"] for m in lh.missing_env_records(out)] == [str(proj / ".venv")]
+    plan = lh.rebuild_plan(rec)
+    assert plan[0][0][-3:] == ["--python", "3.11", str(proj / ".venv")]
+    (proj / ".venv").mkdir()
+    with pytest.raises(ValueError):                         # still there: no record
+        lh.record_lost_env("sonar", proj, proj / ".venv", out_dir=out)
+    with pytest.raises(ValueError):                         # nothing to rebuild from
+        lh.record_lost_env("x", tmp_path, tmp_path / "node_modules", out_dir=out)
+
+
+def test_rebuild_plan_without_freeze(tmp_path, monkeypatch):
+    monkeypatch.setattr(lh, "_uv", lambda: "/u/uv")
+    base = {"env_path": str(tmp_path / "p" / ".venv"), "kind": "python", "python": "3.11",
+            "freeze": None}
+    plan = lh.rebuild_plan({**base, "rebuild": "uv sync"})
+    assert plan[1][0] == ["/u/uv", "sync"] and plan[1][2] == {
+        "UV_PROJECT_ENVIRONMENT": base["env_path"]}
+    plan = lh.rebuild_plan({**base, "rebuild": "pip install -r requirements.txt"})
+    assert plan[1][0][-2:] == ["-r", "requirements.txt"] and plan[1][0][1:3] == ["pip", "install"]
+    node = lh.rebuild_plan({"env_path": str(tmp_path / "w" / "node_modules"), "kind": "node",
+                            "rebuild": "npm ci"})
+    assert node == [(["npm", "ci"], str(tmp_path / "w"), {})]
+
+
+def test_card_select_safe_ticks_caches_only(card):
+    from PySide6.QtCore import Qt
+    row = _row("sonar", reclaim_kb=6, items=[
+        _item(Path("/x/sonar/__pycache__"), kind="junk", kb=1, rebuild=None),
+        _item(Path("/x/sonar/.venv"), kb=5)])                          # offered env
+    card._populate([row])
+    assert card.table.item(0, 1).flags() & Qt.ItemIsUserCheckable
+    card.toggle_safe()
+    assert card.table.item(0, 0).checkState() == Qt.Checked
+    assert card.table.item(0, 1).checkState() == Qt.Unchecked          # env needs its own tick
+
+
+def test_env_confirm_line_shows_evidence_and_cost():
+    t = {"path": Path("/x/sonar/.venv"), "project": "sonar", "rebuild": "uv sync",
+         "last_use": 0.0 + 1, "last_use_source": "tests run (.pytest_cache)"}
+    line = lh.env_confirm_line(t, "1.2 GB", now=1 + 9 * 86400)
+    assert "last used 9 days ago (tests run" in line and "rebuild: uv sync" in line
+    assert "re-downloads about 1.2 GB" in line
+    assert "no sign of use" in lh.env_confirm_line({**t, "last_use": None}, "1 MB")
+
+
+def test_process_snapshot_leaves_out_the_scanner(monkeypatch):
+    me = os.getpid()
+
+    class R:
+        def __init__(self, out):
+            self.stdout = out
+    outs = iter([R(f"{me} /p/.venv/bin/python scan\n7 /q/.venv/bin/python app\n"),
+                 R(f"p{me}\ncPython\nn/p/.venv/lib/x.so\np7\ncPython\nn/q/.venv/lib/y.so\n")])
+    monkeypatch.setattr(lh.subprocess, "run", lambda *a, **k: next(outs))
+    assert {pid for pid, _, _ in lh.process_snapshot()} == {7}
 
 
 def test_launchd_jobs_and_app_roots(tmp_path):
@@ -258,7 +464,7 @@ def test_manifest_hash_and_duplicates(tmp_path):
                               ("imprint-deps", 200, "a==1\nb==2"), ("solo", 50, "c==3")):
         p = tmp_path / name; (p / ".venv").mkdir(parents=True)
         (p / "requirements.txt").write_text(reqs)
-        item = lh.classify_item(p, p / ".venv", 5, 0, last_use=mtime, now=10**7)
+        item = lh.classify_item(p, p / ".venv", 5, None, last_use=mtime, now=10**7)
         item["manifest_hash"] = lh.manifest_hash(p, p / ".venv")
         rows.append({"items": [item]})
     hashes = {r["items"][0]["manifest_hash"] for r in rows[:3]}
@@ -440,3 +646,34 @@ def test_system_cache_locations_only_existing(tmp_path):
     found = lh.system_cache_locations(tmp_path)
     assert [f["label"] for f in found] == ["npm"] and found[0]["kb"] >= 2
     assert "npm cache clean" in found[0]["cmd"]
+
+
+def test_clean_system_cache_empties_folder_when_tool_missing(tmp_path):
+    cache = tmp_path / ".npm" / "_cacache"
+    (cache / "sub").mkdir(parents=True)
+    (cache / "sub" / "f").write_text("x"); (cache / "g").write_text("y")
+    item = {"path": cache, "auto": True, "argv": ["definitely-not-a-tool-xyz"]}
+    ok, msg = lh.clean_system_cache(item, home=tmp_path)
+    assert ok and cache.is_dir() and list(cache.iterdir()) == []
+
+
+def test_clean_system_cache_refuses_unsafe(tmp_path):
+    outside = tmp_path / "out"; outside.mkdir(); (outside / "f").write_text("x")
+    home = tmp_path / "home"; home.mkdir()
+    assert not lh.clean_system_cache({"path": outside, "auto": True, "argv": None}, home)[0]
+    assert (outside / "f").exists()
+    inside = home / "c"; inside.mkdir(); (inside / "f").write_text("x")
+    assert not lh.clean_system_cache({"path": inside, "auto": False, "argv": None}, home)[0]
+    assert (inside / "f").exists()
+    link = home / "l"; link.symlink_to(outside)
+    assert not lh.clean_system_cache({"path": link, "auto": True, "argv": None}, home)[0]
+    assert (outside / "f").exists()
+
+
+def test_docker_is_report_only_and_risky_ones_unticked(tmp_path):
+    for rel in ("Library/Containers/com.docker.docker", ".cache/huggingface", ".cache/uv"):
+        (tmp_path / rel).mkdir(parents=True)
+    by = {f["label"]: f for f in lh.system_cache_locations(tmp_path)}
+    assert by["Docker data"]["auto"] is False
+    assert by["Hugging Face models"]["default"] is False
+    assert by["uv"]["default"] is True

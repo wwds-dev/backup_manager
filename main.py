@@ -155,6 +155,42 @@ def _check_icon() -> str:
     return path.as_posix()
 
 
+def _arrow_pngs(color: str) -> dict:
+    """Small up/down chevrons for spin boxes and combo boxes (a styled Qt widget
+    loses its native arrows). Written once per colour to the temp folder."""
+    import tempfile
+    base = Path(tempfile.gettempdir()) / "bcc_arrows"
+    out = {}
+    try:
+        base.mkdir(exist_ok=True)
+        for name in ("up", "down"):
+            f = base / f"{name}_{color.lstrip('#')}.png"
+            if not f.exists():
+                pm = QPixmap(20, 20)
+                pm.fill(Qt.transparent)
+                pt = QPainter(pm)
+                pt.setRenderHint(QPainter.Antialiasing)
+                pen = QPen(QColor(color), 2)
+                pen.setCapStyle(Qt.RoundCap)
+                pen.setJoinStyle(Qt.RoundJoin)
+                pt.setPen(pen)
+                y1, y2 = (12, 7) if name == "up" else (7, 12)
+                pt.drawPolyline(QPolygonF([QPointF(6, y1), QPointF(10, y2), QPointF(14, y1)]))
+                pt.end()
+                pm.save(str(f))
+            out[name] = f.as_posix()
+    except Exception:
+        pass
+    return out
+
+
+def make_spin(spin=None):
+    """A QSpinBox whose text sits inside the rounded field, not against its edge."""
+    spin = spin or QSpinBox()
+    spin.lineEdit().setTextMargins(6, 0, 0, 0)
+    return spin
+
+
 def build_app_style(dark: bool) -> str:
     # iOS / macOS Human Interface Guideline palette
     if dark:
@@ -217,6 +253,15 @@ def build_app_style(dark: bool) -> str:
         menu_bdr = "#C6C6C8"
 
     check_icon = _check_icon()
+    arrows = _arrow_pngs(sec)
+    arrow_css = ""
+    if arrows:
+        arrow_css = (
+            f"QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ image: url({arrows['up']}); "
+            f"width: 12px; height: 12px; }}\n"
+            f"QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{ image: url({arrows['down']}); "
+            f"width: 12px; height: 12px; }}\n"
+            f"QComboBox::down-arrow {{ image: url({arrows['down']}); width: 12px; height: 12px; }}")
     return f"""
 /* ── Base: colour + font only — NO background.
    Setting background here would paint every child widget with the page
@@ -408,15 +453,51 @@ QHeaderView::section {{
 }}
 
 /* ── Inputs ─────────────────────────────────────── */
-QLineEdit {{
+QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
     background: {inp_bg};
     color: {text};
     border: 1px solid {inp_bdr};
-    border-radius: 8px;
-    padding: 6px 10px;
+    border-radius: 10px;
+    padding: 7px 12px;
+    min-height: 20px;
+    selection-background-color: {inp_foc};
+    selection-color: white;
 }}
-QLineEdit:focus {{
-    border: 1.5px solid {inp_foc};
+QLineEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover, QComboBox:hover {{
+    border: 1px solid {inp_foc};
+}}
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {{
+    border: 2px solid {inp_foc};
+    padding: 6px 11px;
+}}
+QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QComboBox:disabled {{
+    color: {dis_fg};
+    background: {dis_bg};
+    border: 1px solid {dis_bg};
+}}
+QSpinBox, QDoubleSpinBox {{
+    padding-left: 12px;
+    padding-right: 22px;
+}}
+QSpinBox QLineEdit, QDoubleSpinBox QLineEdit {{
+    border: none;
+    background: transparent;
+    padding: 0 0 0 6px;
+    min-height: 0;
+}}
+QSpinBox::up-button, QSpinBox::down-button,
+QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
+    width: 22px;
+    border: none;
+    background: transparent;
+    subcontrol-origin: border;
+}}
+QSpinBox::up-button, QDoubleSpinBox::up-button {{ subcontrol-position: top right; }}
+QSpinBox::down-button, QDoubleSpinBox::down-button {{ subcontrol-position: bottom right; }}
+{arrow_css}
+QComboBox::drop-down {{
+    border: none;
+    width: 26px;
 }}
 
 /* ── Dialogs ────────────────────────────────────── */
@@ -1097,29 +1178,38 @@ class LabHealthWorker(QThread):
         rows = []
         if LAB_ACTIVE.exists():
             # One snapshot of what could be running from an env, shared by every project.
-            usage = (lab_health.process_snapshot(), lab_health.launchd_jobs(),
-                     lab_health.app_project_roots())
+            usage = lab_health.usage_snapshot(LAB_ACTIVE)
+            usage["memory"] = lab_health.load_use_memory()
             for proj in sorted(LAB_ACTIVE.iterdir()):
                 if proj.is_dir() and not proj.name.startswith("."):
                     rows.append(self._scan_project(proj, usage))
+            lab_health.save_use_memory(usage["memory"])
             lab_health.mark_duplicates(rows)
         self.done.emit(rows)
 
     @classmethod
-    def _scan_project(cls, proj, usage=((), {}, {})):
+    def _scan_project(cls, proj, usage=None):
         link = proj
         external = lab_health.is_external(link, LAB_ACTIVE)
         proj = proj.resolve()   # lab/active holds symlinks to out-of-tree projects
         total_kb = cls._size_kb(proj)
         idle = lab_health.idle_days(proj)
-        procs, jobs, apps = usage
+        usage = usage or {}
         items = []
         for p in cls._find_disposable(proj):
             is_env = p.name in lab_health.ENV_NAMES
+            users = evidence = None
+            if is_env:
+                users = lab_health.env_users(
+                    p, proj, usage.get("procs", ()), usage.get("jobs"), usage.get("apps"),
+                    hub=usage.get("hub", ()), bundles=usage.get("bundles"),
+                    self_paths=usage.get("self", ()))
+                if p.name in lab_health.ENV_NAMES - {"dist", "build"}:
+                    evidence = lab_health.recall_use(
+                        p, lab_health.use_evidence(p, usage), usage.setdefault("memory", {}))
             item = lab_health.classify_item(
-                proj, p, cls._size_kb(p), idle,
-                users=lab_health.env_users(p, proj, procs, jobs, apps) if is_env else None,
-                last_use=lab_health.env_last_use(p) if is_env else None)
+                proj, p, cls._size_kb(p), idle, users=users,
+                last_use=lab_health.env_last_use(p) if is_env else None, evidence=evidence)
             if is_env:
                 item["manifest_hash"] = lab_health.manifest_hash(proj, p)
                 item["package_set_hash"] = lab_health.package_set_hash(proj, p)
@@ -2765,8 +2855,9 @@ class LabHealthCard(Card):
         self.table.itemSelectionChanged.connect(self._update_commit_button)
         self.table.itemChanged.connect(self._update_ticked)
         select = secondary_button("☑ Select all safe")
-        select.setToolTip("Tick every cache and every environment that is offered "
-                          "(idle project, rebuildable). Click again to clear.")
+        select.setToolTip("Tick every project's caches (they regenerate by themselves). "
+                          "Environments are never ticked from here: tick each one you "
+                          "want to remove. Click again to clear.")
         select.clicked.connect(self.toggle_safe)
         row.addWidget(rescan)
         row.addWidget(self.sel_dirty)
@@ -2784,18 +2875,25 @@ class LabHealthCard(Card):
         syscache.clicked.connect(self.show_system_caches)
         self.syscache_btn = syscache
         row.addWidget(syscache)
+        rebuild = secondary_button("♻ Rebuild missing envs…")
+        rebuild.setToolTip("Recreate environments this card moved to the Trash, from the "
+                           "record saved before each one went (exact package versions for "
+                           "Python envs). Nothing is deleted.")
+        rebuild.clicked.connect(self.rebuild_missing)
+        self.rebuild_btn = rebuild
+        row.addWidget(rebuild)
         self.body(row)
 
         lab_health.apply_settings(lab_health.load_settings())
         trow = QHBoxLayout()
         trow.addWidget(QLabel("Offer a .venv / node_modules unused for"))
-        self.env_days = QSpinBox()
+        self.env_days = make_spin()
         self.env_days.setRange(1, 365)
         self.env_days.setSuffix(" days")
         self.env_days.setValue(lab_health.ENV_IDLE_DAYS)
         trow.addWidget(self.env_days)
         trow.addWidget(QLabel("; build / dist when the project is idle"))
-        self.proj_days = QSpinBox()
+        self.proj_days = make_spin()
         self.proj_days.setRange(1, 365)
         self.proj_days.setSuffix(" days")
         self.proj_days.setValue(lab_health.IDLE_DAYS)
@@ -2853,14 +2951,77 @@ class LabHealthCard(Card):
         if not found:
             QMessageBox.information(self, "Other caches", "None of the known caches exist.")
             return
-        total = sum(f["kb"] for f in found)
-        lines = [f"{human_size(f['kb'] * 1024):>9}  {f['label']}\n           run: {f['cmd']}"
-                 for f in found]
-        QMessageBox.information(
-            self, "Other caches",
-            f"{human_size(total * 1024)} in tool caches outside lab/active. They rebuild "
-            "when needed; clean one with the command shown, in Terminal.\n\n"
-            + "\n".join(lines))
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Other caches")
+        lay = QVBoxLayout(dlg)
+        head = QLabel("Tool caches outside lab/active. They rebuild when needed (a first "
+                      "install or build afterwards is slower). Tick what to clean; each uses "
+                      "the tool's own cleanup, or empties the folder when the tool is missing.")
+        head.setWordWrap(True)
+        lay.addWidget(head)
+        boxes = []
+        for f in found:
+            cb = QCheckBox(f"{human_size(f['kb'] * 1024)}  {f['label']}")
+            cb.setChecked(bool(f["default"] and f["auto"]))
+            cb.setEnabled(bool(f["auto"]))
+            cb.setToolTip(f"{f['path']}\n" + (f["note"] or f"Runs: {f['cmd']}"))
+            lay.addWidget(cb)
+            if f["note"]:
+                note = QLabel("      " + f["note"])
+                note.setObjectName("CardSubtitle")
+                note.setWordWrap(True)
+                lay.addWidget(note)
+            boxes.append((cb, f))
+        status = QLabel("")
+        status.setWordWrap(True)
+        lay.addWidget(status)
+        brow = QHBoxLayout()
+        go = QPushButton("🧹 Clean checked")
+        close = QPushButton("Close")
+        brow.addStretch()
+        brow.addWidget(go)
+        brow.addWidget(close)
+        lay.addLayout(brow)
+        close.clicked.connect(dlg.accept)
+
+        def run():
+            todo = [f for cb, f in boxes if cb.isChecked() and cb.isEnabled()]
+            if not todo:
+                status.setText("Nothing ticked.")
+                return
+            kb = sum(f["kb"] for f in todo)
+            if QMessageBox.question(
+                    dlg, "Clean caches",
+                    f"Clean {len(todo)} caches (up to {human_size(kb * 1024)})?\nThis deletes "
+                    "them for good; they are rebuilt or re-downloaded when needed.",
+                    QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel) != QMessageBox.Yes:
+                return
+            go.setEnabled(False)
+            status.setText("Cleaning… (large caches can take a minute)")
+
+            def work():
+                return [(f, *lab_health.clean_system_cache(f)) for f in todo]
+
+            def finished(results):
+                go.setEnabled(True)
+                if results is None:
+                    status.setText("Cleaning failed unexpectedly.")
+                    return
+                mark = {True: "\u2713", False: "\u2717"}
+                status.setText("\n".join(f"{mark[ok]} {f['label']}: {msg}"
+                                          for f, ok, msg in results))
+                for cb, f in boxes:
+                    if any(f is r[0] and r[1] for r in results):
+                        cb.setChecked(False)
+                        cb.setEnabled(False)
+
+            worker = CallWorker(work)
+            worker.done.connect(finished)
+            self._syscache_clean_worker = replace_worker(
+                getattr(self, "_syscache_clean_worker", None), worker)
+
+        go.clicked.connect(run)
+        dlg.exec()
 
     def _show_largest(self, info):
         worker = CallWorker(lambda: lab_health.top_folders(Path(info["path"])))
@@ -3199,8 +3360,9 @@ class LabHealthCard(Card):
             f"Will delete: {human_size(kb * 1024)} in {len(targets)} folders" if targets else "")
 
     def toggle_safe(self):
-        """Tick every offered cache and environment; if all are ticked, clear them."""
-        boxes = [self.table.item(r, c) for r in range(len(self._rows)) for c in (0, 1)]
+        """Tick every project's caches; if all are ticked, clear them. Environments
+        are never ticked from here: each needs its own explicit tick."""
+        boxes = [self.table.item(r, 0) for r in range(len(self._rows))]
         boxes = [b for b in boxes if b and b.flags() & Qt.ItemIsUserCheckable]
         state = Qt.Unchecked if boxes and all(
             b.checkState() == Qt.Checked for b in boxes) else Qt.Checked
@@ -3232,9 +3394,12 @@ class LabHealthCard(Card):
         if envs:
             text += (f"Move {len(envs)} environment folders "
                      f"({human_size(sum(t['kb'] for t in envs) * 1024)}) to the Trash:\n"
-                     f"{listing(envs, True)}\n\nThose projects won't run until you run the "
-                     "rebuild command. You can restore them from the Trash until you empty it, "
-                     "and the disk space is freed only then.\n\n")
+                     + "\n".join(lab_health.env_confirm_line(t, human_size(t["kb"] * 1024))
+                                 for t in envs)
+                     + "\n\nThose projects won't run until the env is rebuilt. A rebuild "
+                     "record (exact package versions for Python) is saved first, so "
+                     "“Rebuild missing envs” can recreate each one even after the "
+                     "Trash is emptied. The disk space is freed when you empty the Trash.\n\n")
         if junk:
             text += (f"Permanently delete {len(junk)} cache folders "
                      f"({human_size(sum(t['kb'] for t in junk) * 1024)}):\n"
@@ -3246,12 +3411,20 @@ class LabHealthCard(Card):
             return
 
         errors, trashed_kb = [], 0
+        projects = {r["name"]: Path(r["path"]) for r in self._rows}
         for t in targets:
             label = f"{t['project']}/{t['path'].name}"
             try:
                 if t["kind"] == "junk":
                     shutil.rmtree(t["path"])
-                elif QFile.moveToTrash(str(t["path"])):
+                    continue
+                try:   # no record, no trash: the env must stay recoverable
+                    lab_health.write_rebuild_record(
+                        t, projects.get(t["project"], t["path"].parent))
+                except OSError as e:
+                    errors.append(f"{label}: rebuild record not saved ({e}); left in place")
+                    continue
+                if QFile.moveToTrash(str(t["path"])):
                     trashed_kb += t["kb"]
                 else:
                     errors.append(f"{label}: could not move to the Trash (left in place)")
@@ -3263,7 +3436,57 @@ class LabHealthCard(Card):
             QMessageBox.information(
                 self, "Moved to the Trash",
                 f"{human_size(trashed_kb * 1024)} is in the Trash. Empty it to free the "
-                "disk space, or restore a folder with Put Back.")
+                "disk space. To get an env back, use Put Back or “Rebuild missing "
+                "envs”.")
+        self.rescan()
+
+    def rebuild_missing(self):
+        records = lab_health.missing_env_records()
+        if not records:
+            QMessageBox.information(
+                self, "Nothing to rebuild",
+                "Every environment this card moved to the Trash is present again (or none "
+                "was ever moved with a rebuild record).")
+            return
+        lines = []
+        for r in records:
+            how = (f"{len(r['freeze'])} pinned packages" if r.get("freeze")
+                   else f"{r.get('rebuild')}")
+            lines.append(f"  {r['project']}/{os.path.relpath(r['env_path'], r['project_path'])}"
+                         f"  (~{human_size(r.get('kb', 0) * 1024)} to download)  → {how}"
+                         + ("  [last try failed]" if r.get("failed") else ""))
+        if QMessageBox.question(
+                self, "Rebuild missing envs",
+                f"Recreate {len(records)} environment(s)?\n" + "\n".join(lines)
+                + "\n\nThis downloads packages and can take several minutes. Nothing is "
+                "deleted.", QMessageBox.Yes | QMessageBox.Cancel,
+                QMessageBox.Cancel) != QMessageBox.Yes:
+            return
+
+        def work():
+            out = []
+            for r in records:
+                ok, msg = lab_health.rebuild_from_record(r)
+                out.append((r["project"], os.path.relpath(r["env_path"], r["project_path"]),
+                            ok, msg))
+            return out
+
+        self.rebuild_btn.setEnabled(False)
+        self.rebuild_btn.setText("♻ Rebuilding…")
+        worker = CallWorker(work)
+        worker.done.connect(self._rebuild_done)
+        self.rebuild_worker = replace_worker(getattr(self, "rebuild_worker", None), worker)
+
+    def _rebuild_done(self, results):
+        self.rebuild_btn.setEnabled(True)
+        self.rebuild_btn.setText("♻ Rebuild missing envs…")
+        if results is None:
+            QMessageBox.warning(self, "Rebuild failed", "The rebuild stopped with an error.")
+        else:
+            yes, no = "✓", "✗"
+            QMessageBox.information(self, "Rebuild results", "\n".join(
+                f"{yes if ok else no} {proj}/{env}: {msg}"
+                for proj, env, ok, msg in results))
         self.rescan()
 
 
@@ -4024,11 +4247,11 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(QLabel("Nightly backup time:"))
         time_row = QHBoxLayout()
-        self._hour_spin = QSpinBox()
+        self._hour_spin = make_spin()
         self._hour_spin.setRange(0, 23)
         self._hour_spin.setValue(state.get("backup_hour", 3))
         self._hour_spin.setSuffix("h")
-        self._minute_spin = QSpinBox()
+        self._minute_spin = make_spin()
         self._minute_spin.setRange(0, 59)
         self._minute_spin.setSingleStep(15)
         self._minute_spin.setValue(state.get("backup_minute", 30))

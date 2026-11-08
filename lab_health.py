@@ -308,14 +308,16 @@ def env_last_use(env: Path) -> float | None:
 def process_snapshot() -> list[tuple[int, str, str]]:
     """(pid, name, path) for every running process: its command line (ps) and every
     executable or library it has mapped (lsof txt), so a Python started as plain
-    `python` still shows up through the site-packages modules it loaded."""
+    `python` still shows up through the site-packages modules it loaded. The
+    scanning process itself is left out, so a scan run from an env never locks it."""
     out: list[tuple[int, str, str]] = []
+    me = os.getpid()
     try:
         r = subprocess.run(["ps", "-axww", "-o", "pid=,command="],
                            capture_output=True, text=True, timeout=20)
         for line in r.stdout.splitlines():
             parts = line.split(None, 1)
-            if len(parts) == 2 and parts[0].isdigit():
+            if len(parts) == 2 and parts[0].isdigit() and int(parts[0]) != me:
                 out.append((int(parts[0]), Path(parts[1].split()[0]).name, parts[1]))
     except (OSError, subprocess.SubprocessError):
         pass
@@ -329,7 +331,7 @@ def process_snapshot() -> list[tuple[int, str, str]]:
                 pid = int(val) if val.isdigit() else 0
             elif tag == "c":
                 name = val
-            elif tag == "n" and pid:
+            elif tag == "n" and pid and pid != me:
                 out.append((pid, name, val))
     except (OSError, subprocess.SubprocessError):
         pass
@@ -390,16 +392,99 @@ def _inside(path: str, root: str) -> bool:
     return path == root or path.startswith(root.rstrip("/") + "/")
 
 
-def env_users(env: Path, proj: Path, procs=(), jobs=None, apps=None) -> list[str]:
-    """Everything that still runs from `env`: live processes with a path inside it,
-    launchd jobs naming it, apps whose project_root.txt points at its checkout.
-    A launchd job that runs a script from the checkout also counts for the
-    checkout's own Python env, since that script most likely uses it."""
+LAB_HUB_APPS_TOML = Path("lab_hub") / "lab_hub" / "apps.toml"
+
+
+def lab_hub_apps(lab_active: Path) -> list[dict]:
+    """Apps Lab Hub launches, from <lab/active>/lab_hub/lab_hub/apps.toml:
+    {key, name, project (real path), from_source}. A from-source app runs
+    `<project>/.venv/bin/python <entry>`, so that env must never be offered."""
+    import tomllib
+    try:
+        data = tomllib.loads((Path(lab_active) / LAB_HUB_APPS_TOML).read_text())
+    except (OSError, ValueError):
+        return []
+    apps = []
+    for group in data.values():
+        if not isinstance(group, list):
+            continue
+        for a in group:
+            if isinstance(a, dict) and a.get("project"):
+                apps.append({"key": str(a.get("key", "")), "name": str(a.get("name", a["project"])),
+                             "project": os.path.realpath(Path(lab_active) / str(a["project"])),
+                             "from_source": a.get("runs_from_source", True) is not False})
+    return apps
+
+
+def bundle_references(apps_dir: Path = APPS_DIR, max_kb: int = 256) -> dict[str, list[str]]:
+    """App name -> absolute paths named in its launcher scripts, Info.plist and small
+    text resources (Contents/MacOS/*, Contents/Resources/*), so a bundle whose stub
+    runs `<checkout>/.venv/bin/python` is seen even without project_root.txt."""
+    import re
+    pat = re.compile(rb"(/Users/[^\s\"'<>:;,]+)")
+    refs: dict[str, list[str]] = {}
+    for app in sorted(Path(apps_dir).glob("*.app")):
+        found: set[str] = set()
+        files = [app / "Contents" / "Info.plist"]
+        for sub in ("MacOS", "Resources"):
+            try:
+                files += [p for p in (app / "Contents" / sub).iterdir() if p.is_file()]
+            except OSError:
+                pass
+        for f in files:
+            try:
+                if f.stat().st_size > max_kb * 1024:
+                    continue
+                found.update(m.decode(errors="ignore").rstrip("/.")
+                             for m in pat.findall(f.read_bytes()))
+            except OSError:
+                continue
+        if found:
+            refs[app.stem] = sorted(found)
+    return refs
+
+
+def self_env_paths() -> list[str]:
+    """Where the running interpreter lives (the app's own env when run from source)."""
+    import sys
+    return sorted({os.path.realpath(sys.prefix),
+                   os.path.realpath(Path(sys.executable).parent.parent)})
+
+
+def usage_snapshot(lab_active: Path) -> dict:
+    """Everything env_users() / use_evidence() look at, gathered once per scan."""
+    return {"procs": process_snapshot(), "jobs": launchd_jobs(),
+            "apps": app_project_roots(), "bundles": bundle_references(),
+            "hub": lab_hub_apps(lab_active), "self": self_env_paths(),
+            "hub_logs": lab_hub_launch_times(lab_hub_apps(lab_active)),
+            "history": shell_history()}
+
+
+def env_users(env: Path, proj: Path, procs=(), jobs=None, apps=None, *, hub=(),
+              bundles=None, self_paths=()) -> list[str]:
+    """Everything that still runs from `env`, idle or not: this app itself, live
+    processes with a path inside it, launchd jobs naming it, Lab Hub apps run from
+    its checkout, installed bundles whose project_root.txt or launcher names it.
+    A launchd job or bundle that runs something from the checkout also counts for
+    the checkout's own root env, since that is the env it most likely uses."""
     env_s, env_r = str(env), os.path.realpath(env)
     roots = {env_s, env_r}
     proj_r = os.path.realpath(proj)
-    own_py = env.name in _PY_ENVS and os.path.realpath(env.parent) == proj_r
+    base_r = os.path.realpath(env.parent)
+    own_py = env.name in _USE_ENVS and base_r == proj_r
     users: list[str] = []
+    for sp in self_paths:
+        if _inside(sp, env_r):
+            users.append("this app (Backup Control Center) runs from it")
+    for h in hub:
+        if h["from_source"] and h["project"] == base_r and env.name in _USE_ENVS:
+            users.append(f"Lab Hub app {h['name']} runs from this checkout")
+    for app, paths in (bundles or {}).items():
+        if any(_inside(p, r) for p in paths for r in roots):
+            users.append(f"{app}.app names it in its launcher")
+        elif own_py and app not in (apps or {}) and any(
+                _inside(p, proj_r) and p != proj_r for p in paths):
+            users.append(f"{app}.app launches from this checkout")
     seen = set()
     for pid, name, path in procs:
         if pid in seen:
@@ -412,11 +497,168 @@ def env_users(env: Path, proj: Path, procs=(), jobs=None, apps=None) -> list[str
             users.append(f"launchd job {job}")
         elif own_py and any(_inside(s, proj_r) and s != proj_r for s in strings):
             users.append(f"launchd job {job} (runs from this project)")
-    if env.name in _PY_ENVS:
+    if env.name in _USE_ENVS:
         for app, root in (apps or {}).items():
-            if root == os.path.realpath(env.parent):
+            if root == base_r:
                 users.append(f"{app}.app (launches from this checkout)")
     return users
+
+
+# --- Evidence an env was used recently --------------------------------------------
+# Running code leaves no trace in the env itself (bin/ changes only on install and
+# macOS stops updating read times after the first read), so look at what running
+# the project writes next to it.
+_EVIDENCE_SKIP = SKIP_DIRS | {"node_modules", ".claude", "worktrees"}
+HISTORY_FILES = (Path.home() / ".zsh_history", Path.home() / ".bash_history")
+HISTORY_RECENT_LINES = 300   # untimestamped history: only the tail counts, dated by mtime
+
+
+def _newest(paths) -> float:
+    newest = 0.0
+    for p in paths:
+        try:
+            newest = max(newest, p.stat().st_mtime)
+        except OSError:
+            pass
+    return newest
+
+
+def _newest_tree(root: Path, max_files: int = 2000) -> float:
+    newest, n = 0.0, 0
+    for r, _, files in os.walk(root):
+        for f in files:
+            n += 1
+            try:
+                newest = max(newest, os.stat(os.path.join(r, f)).st_mtime)
+            except OSError:
+                pass
+            if n >= max_files:
+                return newest
+    return newest
+
+
+def lab_hub_launch_times(hub: list[dict], log_dir: Path | None = None) -> dict[str, float]:
+    """Project real path -> when Lab Hub last launched it (its launch log's mtime)."""
+    import tempfile
+    log_dir = Path(log_dir or tempfile.gettempdir())
+    out = {}
+    for h in hub:
+        t = _newest([log_dir / f"lab-hub-launch-{h['key']}.log"])
+        if t:
+            out[h["project"]] = max(out.get(h["project"], 0.0), t)
+    return out
+
+
+def shell_history(files=HISTORY_FILES) -> list[tuple[float, str]]:
+    """(time, command) for recent shell commands. zsh extended entries carry their
+    own time; plain entries count only in the last HISTORY_RECENT_LINES lines and
+    are dated by the history file's mtime (so: "recently", not exactly when)."""
+    out = []
+    for f in files:
+        try:
+            mtime = f.stat().st_mtime
+            lines = f.read_bytes().decode(errors="ignore").splitlines()
+        except OSError:
+            continue
+        for i, line in enumerate(lines):
+            if line.startswith(": ") and ";" in line:
+                stamp = line[2:].split(":", 1)[0]
+                if stamp.isdigit():
+                    out.append((float(stamp), line.split(";", 1)[1]))
+                    continue
+            if i >= len(lines) - HISTORY_RECENT_LINES:
+                out.append((mtime, line))
+    return out
+
+
+def use_evidence(env: Path, usage: dict | None = None) -> list[tuple[float, str]]:
+    """(time, what) signs that the checkout owning `env` was run recently, newest
+    first: bytecode compiled from its sources, tests run, logs written, uv.lock
+    touched, a dev-server cache, a Lab Hub launch, shell history naming it."""
+    import re
+    usage = usage or {}
+    base = env.parent
+    ev: list[tuple[float, str]] = []
+    py = env.name in _PY_ENVS
+    if py:
+        pyc = 0.0
+        depth0 = len(base.parts)
+        for r, dirs, files in os.walk(base):
+            dirs[:] = [d for d in dirs if d not in _EVIDENCE_SKIP - {"__pycache__"}
+                       and not d.endswith(".noindex")]
+            if len(Path(r).parts) - depth0 >= 5:
+                dirs[:] = []
+            if Path(r).name == "__pycache__":
+                pyc = max(pyc, _newest(Path(r) / f for f in files if f.endswith(".pyc")))
+        if pyc:
+            ev.append((pyc, "Python bytecode compiled from its sources"))
+        t = _newest([base / "uv.lock"])
+        if t:
+            ev.append((t, "uv.lock updated"))
+    if (base / ".pytest_cache").is_dir():
+        t = _newest_tree(base / ".pytest_cache")
+        if t:
+            ev.append((t, "tests run (.pytest_cache)"))
+    logs = [p for d in (base, base / "logs", base / "log")
+            for p in (d.glob("*.log") if d.is_dir() else [])]
+    t = _newest(logs)
+    if t:
+        ev.append((t, "log file written"))
+    if env.name == "node_modules":
+        t = _newest([env / ".vite", env / ".cache", base / ".next", base / ".vite",
+                     base / ".turbo"])
+        if t:
+            ev.append((t, "dev-server / build cache"))
+    base_r = os.path.realpath(base)
+    t = (usage.get("hub_logs") or {}).get(base_r)
+    if t:
+        ev.append((t, "launched from Lab Hub"))
+    name = re.escape(base.name)
+    cd = re.compile(rf"(^|[\s;&|])cd\s+(\S*/)?{name}/?($|[\s;&|])")
+    hist = [ts for ts, cmd in usage.get("history") or ()
+            if base_r in cmd or str(base) in cmd or cd.search(cmd)]
+    if hist:
+        ev.append((max(hist), "named in shell history"))
+    return sorted(ev, reverse=True)
+
+
+def use_memory_file() -> Path:
+    import cloud_quota
+    return cloud_quota.SECRETS_DIR / "env_last_use.json"
+
+
+def load_use_memory(path: Path | None = None) -> dict:
+    try:
+        mem = json.loads((path or use_memory_file()).read_text())
+        return mem if isinstance(mem, dict) else {}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+def save_use_memory(mem: dict, path: Path | None = None) -> None:
+    path = path or use_memory_file()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(mem, indent=1))
+    except OSError:
+        pass
+
+
+def recall_use(env: Path, evidence: list[tuple[float, str]],
+               mem: dict) -> list[tuple[float, str]]:
+    """`evidence` plus the newest sign of use remembered from earlier scans, and
+    `mem` updated with today's newest. Cleaning caches deletes the .pyc and
+    .pytest_cache evidence, so without this an env would look idle on the very
+    next scan."""
+    key = os.path.realpath(env)
+    ev = list(evidence)
+    old = mem.get(key)
+    if isinstance(old, list) and len(old) == 2 and isinstance(old[0], (int, float)):
+        ev.append((float(old[0]), f"{old[1]} (seen on an earlier scan)"))
+    ev.sort(reverse=True)
+    if ev:
+        mem[key] = [ev[0][0], ev[0][1].replace(" (seen on an earlier scan)", "")]
+    return ev
 
 
 def _manifest_lines(proj: Path, folder: Path) -> tuple[str, list[str]] | None:
@@ -481,17 +723,27 @@ def mark_duplicates(rows: list[dict]) -> None:
 
 def classify_item(proj: Path, folder: Path, kb: int, idle: int | None,
                   users: list[str] | None = None, last_use: float | None = None,
-                  now: float | None = None) -> dict:
+                  now: float | None = None,
+                  evidence: list[tuple[float, str]] | None = None) -> dict:
     """One reclaimable folder with what it costs to delete and whether it is offered.
     kind 'junk' regenerates by itself; kind 'env' needs a rebuild, so it is offered
     only when it can be rebuilt, nothing uses it, and it is idle: a .venv /
-    node_modules by its own last use (ENV_IDLE_DAYS), dist/build by the project's
-    (IDLE_DAYS)."""
+    node_modules when its newest sign of use (installs into it, `evidence` from
+    use_evidence(), and for the project's root env the project's own last edit)
+    is ENV_IDLE_DAYS old; dist/build by the project's idle time (IDLE_DAYS)."""
     import time
     now = time.time() if now is None else now
+    signs = list(evidence or [])
+    if last_use:
+        signs.append((last_use, "packages installed or updated in it"))
+    if (folder.name in _USE_ENVS and idle is not None
+            and os.path.realpath(folder.parent) == os.path.realpath(proj)):
+        signs.append((now - idle * 86400, "project files edited or committed"))
+    signs.sort(reverse=True)
     item = {"path": folder, "kb": kb, "kind": "junk", "rebuild": None,
             "eligible": True, "reason": "", "users": list(users or []),
-            "last_use": last_use}
+            "last_use": signs[0][0] if signs else None,
+            "last_use_source": signs[0][1] if signs else "", "evidence": signs}
     if folder.name in JUNK_NAMES:
         return item
     item["kind"] = "env"
@@ -503,14 +755,14 @@ def classify_item(proj: Path, folder: Path, kb: int, idle: int | None,
         item["eligible"] = False
         item["reason"] = "in use: " + "; ".join(item["users"])
     elif folder.name in _USE_ENVS:
-        if last_use is None:
+        if not signs:
             item["eligible"] = False
             item["reason"] = "last use unknown"
         else:
-            used = max(0, int((now - last_use) // 86400))
+            used = max(0, int((now - signs[0][0]) // 86400))
             if used < ENV_IDLE_DAYS:
                 item["eligible"] = False
-                item["reason"] = (f"used {_days(used)} ago "
+                item["reason"] = (f"used {_days(used)} ago: {signs[0][1]} "
                                   f"(offered after {ENV_IDLE_DAYS} unused)")
     elif idle is None or idle < IDLE_DAYS:
         item["eligible"] = False
@@ -527,7 +779,8 @@ def env_tooltip_line(item: dict, size: str, now: float | None = None) -> str:
     now = time.time() if now is None else now
     parts = [f"{item['path'].name} ({size})"]
     if item.get("last_use"):
-        parts.append(f"last used {_days(max(0, int((now - item['last_use']) // 86400)))} ago")
+        parts.append(f"last used {_days(max(0, int((now - item['last_use']) // 86400)))} ago"
+                     + (f" ({item['last_use_source']})" if item.get("last_use_source") else ""))
     if not item.get("eligible"):
         parts.append(f"not offered: {item.get('reason')}")
     elif item.get("kind") == "env":
@@ -540,6 +793,246 @@ def env_tooltip_line(item: dict, size: str, now: float | None = None) -> str:
                      + ", ".join(item["duplicates"])
                      + ("  ← oldest copy, remove this one" if item.get("oldest") else ""))
     return "\n".join(lines)
+
+
+def env_confirm_line(t: dict, size: str, now: float | None = None) -> str:
+    """One env in the Clean up confirmation: where, last-use evidence, rebuild cost."""
+    import time
+    now = time.time() if now is None else now
+    rel = os.path.relpath(t["path"], Path(t["path"]).parent.parent) \
+        if "worktrees" in Path(t["path"]).parts else Path(t["path"]).name
+    if t.get("last_use"):
+        used = (f"last used {_days(max(0, int((now - t['last_use']) // 86400)))} ago"
+                + (f" ({t['last_use_source']})" if t.get("last_use_source") else ""))
+    else:
+        used = "no sign of use found"
+    return (f"  {t.get('project', '')}/{rel} ({size}): {used}\n"
+            f"      rebuild: {t.get('rebuild')}, re-downloads about {size}")
+
+
+# --- Rebuild records: every trashed env can be recreated --------------------------
+
+def records_dir() -> Path:
+    import cloud_quota
+    return cloud_quota.SECRETS_DIR / "env_records"
+
+
+def _uv() -> str | None:
+    for d in ("/opt/homebrew/bin", "/usr/local/bin", "~/.local/bin", "~/.cargo/bin"):
+        p = Path(os.path.expanduser(d)) / "uv"
+        if p.exists():
+            return str(p)
+    return shutil.which("uv")
+
+
+def _python_version(env: Path) -> str | None:
+    """major.minor from pyvenv.cfg (version_info, or version for older venvs)."""
+    try:
+        cfg = dict(l.split("=", 1) for l in (env / "pyvenv.cfg").read_text().splitlines()
+                   if "=" in l)
+    except OSError:
+        return None
+    v = {k.strip(): v.strip() for k, v in cfg.items()}
+    ver = v.get("version_info") or v.get("version")
+    return ".".join(ver.split(".")[:2]) if ver else None
+
+
+def freeze_env(env: Path, runner=subprocess.run) -> tuple[list[str] | None, str]:
+    """Exact package list of a Python env (`uv pip freeze`, else `pip freeze`)."""
+    py = env / "bin" / "python"
+    cmds = []
+    if uv := _uv():
+        cmds.append([uv, "pip", "freeze", "--python", str(py)])
+    cmds.append([str(py), "-m", "pip", "freeze", "--all"])
+    err = "no python in the env"
+    for cmd in cmds:
+        try:
+            r = runner(cmd, capture_output=True, text=True, timeout=90)
+        except (OSError, subprocess.SubprocessError) as e:
+            err = str(e)
+            continue
+        if r.returncode == 0:
+            return [l for l in r.stdout.splitlines() if l.strip()], ""
+        err = (r.stderr or r.stdout).strip()[-300:]
+    return None, err
+
+
+def write_rebuild_record(target: dict, project_path: Path, out_dir: Path | None = None,
+                         runner=subprocess.run, now: float | None = None) -> Path:
+    """Save how to recreate an env before it goes to the Trash. Raises OSError when
+    the record cannot be written; the caller must then not trash the env."""
+    import time
+    now = time.time() if now is None else now
+    env = Path(target["path"])
+    kind = ("python" if env.name in _PY_ENVS else
+            "node" if env.name == "node_modules" else "other")
+    rec = {"project": target.get("project", ""), "project_path": str(project_path),
+           "env_path": str(env), "kind": kind, "rebuild": target.get("rebuild"),
+           "kb": target.get("kb", 0), "created": now, "python": None, "freeze": None,
+           "freeze_error": "", "last_use": target.get("last_use"),
+           "last_use_source": target.get("last_use_source", ""), "rebuilt_at": None,
+           "failed": ""}
+    if kind == "python":
+        rec["python"] = _python_version(env)
+        rec["freeze"], rec["freeze_error"] = freeze_env(env, runner)
+    out_dir = Path(out_dir or records_dir())
+    out_dir.mkdir(parents=True, exist_ok=True)
+    rel = os.path.relpath(env, project_path).replace("/", "_")
+    path = out_dir / f"{rec['project'] or Path(project_path).name}__{rel}__{int(now)}.json"
+    path.write_text(json.dumps(rec, indent=1))
+    return path
+
+
+def record_lost_env(project: str, project_path: Path, env: Path, kb: int = 0,
+                    python: str | None = None, out_dir: Path | None = None,
+                    now: float | None = None, note: str = "") -> Path:
+    """A rebuild record for an env that is already gone (trashed before records
+    existed). No freeze is possible, so it rebuilds from the project's lockfile or
+    manifest. Refuses (ValueError) when the env still exists or nothing says how."""
+    import time
+    now = time.time() if now is None else now
+    env, project_path = Path(env), Path(project_path)
+    if env.exists():
+        raise ValueError(f"{env} still exists")
+    rebuild = rebuild_command(project_path, env)
+    if rebuild is None:
+        raise ValueError(f"no lockfile or manifest for {env}")
+    kind = "python" if env.name in _PY_ENVS else "node" if env.name == "node_modules" else "other"
+    rec = {"project": project, "project_path": str(project_path), "env_path": str(env),
+           "kind": kind, "rebuild": rebuild, "kb": kb, "created": now,
+           "python": python if kind == "python" else None, "freeze": None,
+           "freeze_error": note or "env was gone before a record could be taken",
+           "last_use": None, "last_use_source": "", "rebuilt_at": None, "failed": ""}
+    out_dir = Path(out_dir or records_dir())
+    out_dir.mkdir(parents=True, exist_ok=True)
+    rel = os.path.relpath(env, project_path).replace("/", "_")
+    path = out_dir / f"{project}__{rel}__{int(now)}.json"
+    path.write_text(json.dumps(rec, indent=1))
+    return path
+
+
+def missing_env_records(out_dir: Path | None = None) -> list[dict]:
+    """The newest record per env path whose env is gone (or whose last rebuild
+    failed), each with `_file` set to where it is stored."""
+    out_dir = Path(out_dir or records_dir())
+    newest: dict[str, dict] = {}
+    for f in sorted(out_dir.glob("*.json")) if out_dir.is_dir() else []:
+        try:
+            rec = json.loads(f.read_text())
+        except (OSError, ValueError):
+            continue
+        if not isinstance(rec, dict) or "env_path" not in rec:
+            continue
+        rec["_file"] = str(f)
+        old = newest.get(rec["env_path"])
+        if old is None or rec.get("created", 0) >= old.get("created", 0):
+            newest[rec["env_path"]] = rec
+    return [r for r in newest.values()
+            if not Path(r["env_path"]).exists() or r.get("failed")]
+
+
+def _split_freeze(lines: list[str]) -> tuple[list[str], bool]:
+    """Pinned lines safe to reinstall, and whether an editable/local install of the
+    project itself was dropped (reinstalled from the checkout instead)."""
+    keep, local = [], False
+    for l in lines:
+        s = l.strip()
+        if s.startswith("-e ") or " @ file://" in s or s.startswith("file://"):
+            local = True
+        elif s and not s.startswith("#"):
+            keep.append(s)
+    return keep, local
+
+
+def rebuild_plan(rec: dict) -> list[tuple[list[str], str, dict]]:
+    """The commands (argv, cwd, extra env) that recreate the env in `rec`, exact
+    versions when a freeze was recorded, else the project's rebuild command."""
+    import shlex
+    env = rec["env_path"]
+    base = str(Path(env).parent)
+    if rec["kind"] == "node":
+        return [(shlex.split(rec["rebuild"] or "npm install"), base, {})]
+    if rec["kind"] != "python":
+        return [(shlex.split(rec["rebuild"]), base, {})] if rec.get("rebuild") else []
+    uv = _uv()
+    py = str(Path(env) / "bin" / "python")
+    ver = rec.get("python")
+    steps = []
+    if uv:
+        steps.append(([uv, "venv", "--allow-existing", *(["--python", ver] if ver else []), env],
+                      base, {}))
+        pip = [uv, "pip", "install", "--python", py]
+    else:
+        steps.append(([f"python{ver}" if ver else "python3", "-m", "venv", env], base, {}))
+        pip = [py, "-m", "pip", "install"]
+    if rec.get("freeze"):
+        pinned, local = _split_freeze(rec["freeze"])
+        if pinned:
+            steps.append(([*pip, "-r", "{freeze_file}"], base, {}))
+        if local and any((Path(base) / m).exists() for m in ("pyproject.toml", "setup.py")):
+            steps.append(([*pip, "--no-deps", "-e", base], base, {}))
+        return steps
+    cmd = rec.get("rebuild") or ""
+    if cmd == "uv sync" and uv:
+        steps.append(([uv, "sync"], base, {"UV_PROJECT_ENVIRONMENT": env}))
+    elif cmd.startswith("pip install"):
+        steps.append(([*pip, *shlex.split(cmd)[2:]], base, {}))
+    elif cmd:
+        steps.append((shlex.split(cmd), base, {}))
+    return steps
+
+
+def rebuild_from_record(rec: dict, runner=subprocess.run,
+                        now: float | None = None) -> tuple[bool, str]:
+    """Recreate one env from its record. Never deletes anything: a failed attempt
+    is left in place, marked failed, and the next attempt builds over it."""
+    import tempfile
+    import time
+    now = time.time() if now is None else now
+    env = Path(rec["env_path"])
+    if not Path(rec["project_path"]).is_dir():
+        return False, "project folder is gone"
+    if env.exists() and not rec.get("failed"):
+        return True, "already present"
+    steps = rebuild_plan(rec)
+    if not steps:
+        return False, "no rebuild command recorded"
+    freeze_file = None
+    if rec.get("freeze"):
+        pinned, _ = _split_freeze(rec["freeze"])
+        fd, freeze_file = tempfile.mkstemp(prefix="env-freeze-", suffix=".txt")
+        with os.fdopen(fd, "w") as fh:
+            fh.write("\n".join(pinned) + "\n")
+    ok, msg = True, ("exact versions" if rec.get("freeze") else f"ran {rec.get('rebuild')}")
+    try:
+        for argv, cwd, extra in steps:
+            argv = [freeze_file if a == "{freeze_file}" else a for a in argv]
+            try:
+                r = runner(argv, cwd=cwd, capture_output=True, text=True, timeout=1800,
+                           env={**os.environ, "PATH": os.environ.get("PATH", "") +
+                                ":/opt/homebrew/bin:/usr/local/bin", **extra})
+            except (OSError, subprocess.SubprocessError) as e:
+                ok, msg = False, f"{Path(argv[0]).name}: {e}"
+                break
+            if r.returncode:
+                ok, msg = False, (f"{Path(argv[0]).name} {' '.join(argv[1:3])}: "
+                                  + (r.stderr or r.stdout).strip()[-300:])
+                break
+    finally:
+        if freeze_file:
+            try:
+                os.unlink(freeze_file)
+            except OSError:
+                pass
+    rec["failed"] = "" if ok else msg
+    rec["rebuilt_at"] = now if ok else None
+    if rec.get("_file"):
+        try:
+            Path(rec["_file"]).write_text(json.dumps(
+                {k: v for k, v in rec.items() if k != "_file"}, indent=1))
+        except OSError:
+            pass
+    return ok, msg
 
 
 def cleanup_targets(rows: list[dict], junk_rows: set[int],
@@ -645,31 +1138,92 @@ def top_folders(proj: Path, n: int = 10, min_kb: int = 1024) -> list[tuple[int, 
     return found[:n]
 
 
+TOOL_PATHS = ("/opt/homebrew/bin", "/usr/local/bin", "~/.local/bin", "~/.cargo/bin")
+
+
+def _tool_env() -> dict:
+    """PATH for a GUI app, which starts with only /usr/bin:/bin and cannot find brew, uv, npm."""
+    extra = [os.path.expanduser(p) for p in TOOL_PATHS]
+    return {**os.environ, "PATH": ":".join(extra + [os.environ.get("PATH", "")])}
+
+
 def system_cache_locations(home: Path | None = None) -> list[dict]:
-    """Well-known tool caches outside lab/active that regenerate on demand. Reported
-    with the tool's own cleanup command; this card never deletes them."""
+    """Well-known tool caches outside lab/active that regenerate on demand.
+
+    Each entry: label, path, kb, argv (the tool's own cleanup, or None), default (ticked
+    when the dialog opens), auto (False = reported only, never run from the app) and
+    note. Without the tool installed, an entry with auto=True falls back to emptying
+    its folder.
+    """
     home = home or Path.home()
     lib = home / "Library"
     spec = [
-        ("pip", lib / "Caches" / "pip", "pip cache purge"),
-        ("uv", home / ".cache" / "uv", "uv cache clean"),
-        ("uv (Library)", lib / "Caches" / "uv", "uv cache clean"),
-        ("Homebrew downloads", lib / "Caches" / "Homebrew", "brew cleanup --prune=all"),
-        ("npm", home / ".npm" / "_cacache", "npm cache clean --force"),
-        ("pnpm store", lib / "pnpm", "pnpm store prune"),
-        ("Yarn", lib / "Caches" / "Yarn", "yarn cache clean"),
-        ("Xcode DerivedData", lib / "Developer" / "Xcode" / "DerivedData",
-         "rm -rf ~/Library/Developer/Xcode/DerivedData/*"),
+        # label, path, argv, default ticked, auto, note
+        ("pip", lib / "Caches" / "pip", ["pip", "cache", "purge"], True, True, ""),
+        ("uv", home / ".cache" / "uv", ["uv", "cache", "clean"], True, True, ""),
+        ("uv (Library)", lib / "Caches" / "uv", ["uv", "cache", "clean"], True, True, ""),
+        ("Homebrew downloads", lib / "Caches" / "Homebrew",
+         ["brew", "cleanup", "--prune=all"], True, True, ""),
+        ("npm", home / ".npm" / "_cacache", ["npm", "cache", "clean", "--force"], True, True, ""),
+        ("pnpm store", lib / "pnpm", ["pnpm", "store", "prune"], True, True, ""),
+        ("Yarn", lib / "Caches" / "Yarn", ["yarn", "cache", "clean"], True, True, ""),
+        ("Xcode DerivedData", lib / "Developer" / "Xcode" / "DerivedData", None, True, True,
+         "build output; Xcode recreates it on the next build"),
         ("Unavailable simulators", lib / "Developer" / "CoreSimulator",
-         "xcrun simctl delete unavailable"),
-        ("Hugging Face models", home / ".cache" / "huggingface",
-         "huggingface-cli delete-cache   (models re-download when used)"),
-        ("PyTorch models", home / ".cache" / "torch", "rm -rf ~/.cache/torch   (re-downloads)"),
-        ("Docker data", lib / "Containers" / "com.docker.docker", "docker system prune -a"),
+         ["xcrun", "simctl", "delete", "unavailable"], False, True,
+         "removes only simulators of old Xcode versions; the size shown is all simulators"),
+        ("Hugging Face models", home / ".cache" / "huggingface", None, False, True,
+         "downloaded models; each re-downloads (can be GBs) when a project loads it again"),
+        ("PyTorch models", home / ".cache" / "torch", None, False, True,
+         "downloaded weights; they re-download when used again"),
+        ("Docker data", lib / "Containers" / "com.docker.docker", None, False, False,
+         "images and volumes may hold data: clean in Docker Desktop or `docker system prune`"),
     ]
     out = []
-    for label, path, cmd in spec:
-        if path.exists():
-            out.append({"label": label, "path": path, "kb": _du_kb(path), "cmd": cmd})
+    seen = set()
+    for label, path, argv, default, auto, note in spec:
+        if path.exists() and path not in seen:
+            seen.add(path)
+            out.append({"label": label, "path": path, "kb": _du_kb(path), "argv": argv,
+                        "default": default, "auto": auto, "note": note,
+                        "cmd": " ".join(argv) if argv else "empty the folder"})
     out.sort(key=lambda d: -d["kb"])
     return out
+
+
+def clean_system_cache(item: dict, home: Path | None = None) -> tuple[bool, str]:
+    """Run the cache's own cleanup, or empty its folder when the tool is missing or
+    there is none. Refuses anything not auto, outside the home folder, or a symlink."""
+    home = (home or Path.home()).resolve()
+    if not item.get("auto"):
+        return False, "not cleaned from here"
+    path = Path(item["path"])
+    try:
+        inside = path.resolve().relative_to(home) is not None
+    except ValueError:
+        inside = False
+    if not inside or path.is_symlink():
+        return False, "refused: not a plain folder inside your home folder"
+    argv = item.get("argv")
+    env = _tool_env()
+    if argv and shutil.which(argv[0], path=env["PATH"]):
+        try:
+            r = subprocess.run(argv, capture_output=True, text=True, timeout=900, env=env)
+        except (OSError, subprocess.SubprocessError) as e:
+            return False, f"{argv[0]}: {e}"
+        if r.returncode == 0:
+            return True, "cleaned with " + " ".join(argv)
+        lines = (r.stdout + r.stderr).strip().splitlines()
+        return False, lines[-1] if lines else f"{argv[0]} failed"
+    if argv and not path.is_dir():
+        return False, f"{argv[0]} not installed"
+    failed = 0
+    for child in path.iterdir():
+        try:
+            if child.is_symlink() or child.is_file():
+                child.unlink()
+            else:
+                shutil.rmtree(child)
+        except OSError:
+            failed += 1
+    return failed == 0, ("emptied the folder" if not failed else f"{failed} items could not be removed")
