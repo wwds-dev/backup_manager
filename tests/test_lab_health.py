@@ -607,6 +607,13 @@ def test_select_all_dirty_checkbox(card, monkeypatch):
     assert not card.sel_dirty.isChecked()
     card.sel_dirty.setChecked(True); card.sel_dirty.setChecked(False)
     assert card._selected_rows() == []
+    assert card.sel_dirty.text().endswith("(2)")
+
+
+def test_select_all_dirty_explains_when_nothing_qualifies(card):
+    card._populate([_row("a"), _row("syndustryx", uncommitted=8, external=True)])
+    assert not card.sel_dirty.isEnabled() and card.sel_dirty.text().endswith("(0)")
+    assert "syndustryx" in card.sel_dirty.toolTip() and "own folder" in card.sel_dirty.toolTip()
 
 
 # --- Thresholds, largest folders, system caches --------------------------------

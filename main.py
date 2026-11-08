@@ -3246,6 +3246,15 @@ class LabHealthCard(Card):
         self.sel_dirty.blockSignals(True)
         self.sel_dirty.setChecked(bool(dirty) and self._selected_rows() == dirty)
         self.sel_dirty.setEnabled(bool(dirty))
+        self.sel_dirty.setText(f"Select all with uncommitted changes ({len(dirty)})")
+        linked = [r["name"] for r in self._rows
+                  if r.get("external") and r.get("has_git") and r.get("uncommitted")]
+        self.sel_dirty.setToolTip(
+            "Selects every project that has uncommitted changes, so “Commit” acts "
+            "on all of them. Nothing is committed until you confirm." if dirty else
+            "No project here has uncommitted changes."
+            + (f" Linked projects ({', '.join(linked)}) are committed in their own folder, "
+               "not from this card." if linked else ""))
         self.sel_dirty.blockSignals(False)
 
     def _commit_selected(self):
