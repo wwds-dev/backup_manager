@@ -83,6 +83,10 @@ def card(qapp, monkeypatch):
     import main
     monkeypatch.setattr(main.LabHealthCard, "rescan", lambda self: None)
     monkeypatch.setattr(lh, "load_ignored", lambda path=None: set())
+    monkeypatch.setattr(lh, "load_settings", lambda path=None: {
+        "env_idle_days": 7, "project_idle_days": 30})
+    monkeypatch.setattr(lh, "ENV_IDLE_DAYS", 7)
+    monkeypatch.setattr(lh, "IDLE_DAYS", 30)
     c = main.LabHealthCard()
     _APP.append(c)
     return c
@@ -397,3 +401,42 @@ def test_select_all_dirty_checkbox(card, monkeypatch):
     assert not card.sel_dirty.isChecked()
     card.sel_dirty.setChecked(True); card.sel_dirty.setChecked(False)
     assert card._selected_rows() == []
+
+
+# --- Thresholds, largest folders, system caches --------------------------------
+
+def test_settings_roundtrip_and_validation(tmp_path):
+    f = tmp_path / "s.json"
+    assert lh.load_settings(f) == {"env_idle_days": lh.ENV_IDLE_DAYS,
+                                   "project_idle_days": lh.IDLE_DAYS}
+    lh.save_settings({"env_idle_days": 3, "project_idle_days": 60}, f)
+    assert lh.load_settings(f) == {"env_idle_days": 3, "project_idle_days": 60}
+    f.write_text('{"env_idle_days": 0, "project_idle_days": "x"}')
+    assert lh.load_settings(f)["env_idle_days"] == lh.ENV_IDLE_DAYS
+
+
+def test_apply_settings_changes_eligibility(tmp_path, monkeypatch):
+    monkeypatch.setattr(lh, "ENV_IDLE_DAYS", lh.ENV_IDLE_DAYS)
+    monkeypatch.setattr(lh, "IDLE_DAYS", lh.IDLE_DAYS)
+    lh.apply_settings({"env_idle_days": 2, "project_idle_days": 5})
+    assert (lh.ENV_IDLE_DAYS, lh.IDLE_DAYS) == (2, 5)
+    (tmp_path / "Makefile").write_text("")
+    (tmp_path / "dist").mkdir()
+    assert lh.classify_item(tmp_path, tmp_path / "dist", 1, 3)["eligible"] is False
+    assert lh.classify_item(tmp_path, tmp_path / "dist", 1, 6)["eligible"] is True
+
+
+def test_top_folders_ranks_and_skips_small(tmp_path):
+    (tmp_path / "big").mkdir(); (tmp_path / "big" / "f").write_bytes(b"0" * 3_000_000)
+    (tmp_path / "mid").mkdir(); (tmp_path / "mid" / "f").write_bytes(b"0" * 1_500_000)
+    (tmp_path / "tiny").mkdir(); (tmp_path / "tiny" / "f").write_text("x")
+    names = [p.name for _, p in lh.top_folders(tmp_path)]
+    assert names == ["big", "mid"]
+
+
+def test_system_cache_locations_only_existing(tmp_path):
+    (tmp_path / ".npm" / "_cacache").mkdir(parents=True)
+    (tmp_path / ".npm" / "_cacache" / "x").write_bytes(b"0" * 2048)
+    found = lh.system_cache_locations(tmp_path)
+    assert [f["label"] for f in found] == ["npm"] and found[0]["kb"] >= 2
+    assert "npm cache clean" in found[0]["cmd"]

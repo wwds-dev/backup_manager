@@ -577,3 +577,99 @@ def commit_target(rows: list[dict], selected: list[int]) -> dict | None:
         return None
     row = rows[selected[0]]
     return row if row.get("has_git") and row.get("uncommitted") else None
+
+
+# --- Thresholds the person can change --------------------------------------------
+
+def settings_file() -> Path:
+    import cloud_quota
+    return cloud_quota.SECRETS_DIR / "lab_health_settings.json"
+
+
+def load_settings(path: Path | None = None) -> dict:
+    """{'env_idle_days': int, 'project_idle_days': int}, defaults where unset or invalid."""
+    out = {"env_idle_days": ENV_IDLE_DAYS, "project_idle_days": IDLE_DAYS}
+    try:
+        data = json.loads((path or settings_file()).read_text())
+    except (OSError, ValueError, TypeError):
+        return out
+    if isinstance(data, dict):
+        for k in out:
+            v = data.get(k)
+            if isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= 365:
+                out[k] = v
+    return out
+
+
+def save_settings(settings: dict, path: Path | None = None) -> None:
+    path = path or settings_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(
+        {k: int(settings[k]) for k in ("env_idle_days", "project_idle_days")}, indent=1))
+
+
+def apply_settings(settings: dict) -> None:
+    """Make the thresholds in `settings` the ones classify_item() uses."""
+    global ENV_IDLE_DAYS, IDLE_DAYS
+    ENV_IDLE_DAYS = int(settings["env_idle_days"])
+    IDLE_DAYS = int(settings["project_idle_days"])
+
+
+# --- Where the space is ----------------------------------------------------------
+
+def _du_kb(path: Path, timeout: int = 120) -> int:
+    try:
+        r = subprocess.run(["du", "-sk", str(path)], capture_output=True, text=True,
+                           timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    head = r.stdout.split("\t", 1)[0].strip()
+    return int(head) if head.isdigit() else 0
+
+
+def top_folders(proj: Path, n: int = 10, min_kb: int = 1024) -> list[tuple[int, Path]]:
+    """The n biggest folders up to two levels below `proj` (largest first, nested
+    entries included so .git or data/models stand out), ignoring those under min_kb."""
+    proj = proj.resolve()
+    try:
+        r = subprocess.run(["du", "-k", "-d", "2", str(proj)], capture_output=True,
+                           text=True, timeout=180)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    found = []
+    for line in r.stdout.splitlines():
+        kb, _, path = line.partition("\t")
+        if kb.isdigit() and path and Path(path) != proj and int(kb) >= min_kb:
+            found.append((int(kb), Path(path)))
+    found.sort(key=lambda t: -t[0])
+    return found[:n]
+
+
+def system_cache_locations(home: Path | None = None) -> list[dict]:
+    """Well-known tool caches outside lab/active that regenerate on demand. Reported
+    with the tool's own cleanup command; this card never deletes them."""
+    home = home or Path.home()
+    lib = home / "Library"
+    spec = [
+        ("pip", lib / "Caches" / "pip", "pip cache purge"),
+        ("uv", home / ".cache" / "uv", "uv cache clean"),
+        ("uv (Library)", lib / "Caches" / "uv", "uv cache clean"),
+        ("Homebrew downloads", lib / "Caches" / "Homebrew", "brew cleanup --prune=all"),
+        ("npm", home / ".npm" / "_cacache", "npm cache clean --force"),
+        ("pnpm store", lib / "pnpm", "pnpm store prune"),
+        ("Yarn", lib / "Caches" / "Yarn", "yarn cache clean"),
+        ("Xcode DerivedData", lib / "Developer" / "Xcode" / "DerivedData",
+         "rm -rf ~/Library/Developer/Xcode/DerivedData/*"),
+        ("Unavailable simulators", lib / "Developer" / "CoreSimulator",
+         "xcrun simctl delete unavailable"),
+        ("Hugging Face models", home / ".cache" / "huggingface",
+         "huggingface-cli delete-cache   (models re-download when used)"),
+        ("PyTorch models", home / ".cache" / "torch", "rm -rf ~/.cache/torch   (re-downloads)"),
+        ("Docker data", lib / "Containers" / "com.docker.docker", "docker system prune -a"),
+    ]
+    out = []
+    for label, path, cmd in spec:
+        if path.exists():
+            out.append({"label": label, "path": path, "kb": _du_kb(path), "cmd": cmd})
+    out.sort(key=lambda d: -d["kb"])
+    return out

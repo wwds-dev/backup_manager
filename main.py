@@ -1074,6 +1074,21 @@ class SizeWorker(QThread):
         self.done.emit(sizes, human_size(total))
 
 
+class CallWorker(QThread):
+    """Runs `fn()` off the UI thread and emits its result on `done`."""
+    done = Signal(object)
+
+    def __init__(self, fn):
+        super().__init__()
+        self._fn = fn
+
+    def run(self):
+        try:
+            self.done.emit(self._fn())
+        except Exception:
+            self.done.emit(None)
+
+
 class LabHealthWorker(QThread):
     """Scans lab/active/<project> for disk hogs, git hygiene, and missing manifests."""
     done = Signal(list)  # list of row dicts
@@ -2762,7 +2777,33 @@ class LabHealthCard(Card):
         self.ticked_lbl.setStyleSheet("color: #ef4444; font-weight: 600;")
         row.addWidget(self.ticked_lbl)
         row.addStretch()
+        syscache = secondary_button("🗂 Other caches…")
+        syscache.setToolTip("Sizes of pip, uv, Homebrew, npm, Xcode, model and Docker caches "
+                            "outside lab/active, each with the tool's own cleanup command. "
+                            "Nothing is deleted from here.")
+        syscache.clicked.connect(self.show_system_caches)
+        self.syscache_btn = syscache
+        row.addWidget(syscache)
         self.body(row)
+
+        lab_health.apply_settings(lab_health.load_settings())
+        trow = QHBoxLayout()
+        trow.addWidget(QLabel("Offer a .venv / node_modules unused for"))
+        self.env_days = QSpinBox()
+        self.env_days.setRange(1, 365)
+        self.env_days.setSuffix(" days")
+        self.env_days.setValue(lab_health.ENV_IDLE_DAYS)
+        trow.addWidget(self.env_days)
+        trow.addWidget(QLabel("; build / dist when the project is idle"))
+        self.proj_days = QSpinBox()
+        self.proj_days.setRange(1, 365)
+        self.proj_days.setSuffix(" days")
+        self.proj_days.setValue(lab_health.IDLE_DAYS)
+        trow.addWidget(self.proj_days)
+        trow.addStretch()
+        self.body(trow)
+        self.env_days.editingFinished.connect(self._thresholds_changed)
+        self.proj_days.editingFinished.connect(self._thresholds_changed)
 
         hint = QLabel(
             "Nothing is ticked by default. Caches regenerate by themselves and are deleted "
@@ -2785,6 +2826,66 @@ class LabHealthCard(Card):
             self.table.resizeColumnToContents(c)
         for c in (0, 1):
             self.table.setColumnWidth(c, max(self.table.columnWidth(c) + 24, 120))
+
+    def _thresholds_changed(self):
+        new = {"env_idle_days": self.env_days.value(),
+               "project_idle_days": self.proj_days.value()}
+        if new == {"env_idle_days": lab_health.ENV_IDLE_DAYS,
+                   "project_idle_days": lab_health.IDLE_DAYS}:
+            return
+        lab_health.apply_settings(new)
+        try:
+            lab_health.save_settings(new)
+        except OSError:
+            pass
+        self.rescan()
+
+    def show_system_caches(self):
+        self.syscache_btn.setEnabled(False)
+        self.syscache_btn.setText("🗂 Measuring…")
+        worker = CallWorker(lab_health.system_cache_locations)
+        worker.done.connect(self._system_caches_ready)
+        self._syscache_worker = replace_worker(getattr(self, "_syscache_worker", None), worker)
+
+    def _system_caches_ready(self, found):
+        self.syscache_btn.setEnabled(True)
+        self.syscache_btn.setText("🗂 Other caches…")
+        if not found:
+            QMessageBox.information(self, "Other caches", "None of the known caches exist.")
+            return
+        total = sum(f["kb"] for f in found)
+        lines = [f"{human_size(f['kb'] * 1024):>9}  {f['label']}\n           run: {f['cmd']}"
+                 for f in found]
+        QMessageBox.information(
+            self, "Other caches",
+            f"{human_size(total * 1024)} in tool caches outside lab/active. They rebuild "
+            "when needed; clean one with the command shown, in Terminal.\n\n"
+            + "\n".join(lines))
+
+    def _show_largest(self, info):
+        worker = CallWorker(lambda: lab_health.top_folders(Path(info["path"])))
+        worker.done.connect(lambda found: self._largest_ready(info, found))
+        self._largest_worker = replace_worker(getattr(self, "_largest_worker", None), worker)
+
+    def _largest_ready(self, info, found):
+        if not found:
+            QMessageBox.information(self, f"Largest folders: {info['name']}",
+                                    "No folder over 1 MB (or the scan failed).")
+            return
+        base = Path(info["path"]).resolve()
+        lines = []
+        for kb, p in found:
+            try:
+                rel = str(p.relative_to(base))
+            except ValueError:
+                rel = str(p)
+            lines.append(f"{human_size(kb * 1024):>9}  {rel}")
+        QMessageBox.information(
+            self, f"Largest folders: {info['name']}",
+            f"Biggest folders up to two levels deep in {info['name']} "
+            f"(total {human_size(info['total_kb'] * 1024)}). Nested entries are included, so "
+            "a parent and its child can both appear. A large .git can often be shrunk "
+            "with `git gc --aggressive`.\n\n" + "\n".join(lines))
 
     def rescan(self):
         self.summary_lbl.setText("Scanning…")
@@ -2916,6 +3017,7 @@ class LabHealthCard(Card):
         project_path = Path(info["path"])
         menu = QMenu(self)
         open_action = menu.addAction("📂 Open in Finder")
+        large_action = menu.addAction("📊 Show largest folders…")
         term_action = menu.addAction("🖥 Open in Terminal")
         commit_action = diff_action = ignore_action = None
         if info["uncommitted"]:
@@ -2942,6 +3044,8 @@ class LabHealthCard(Card):
             self._ignored ^= {info["name"]}
             lab_health.save_ignored(self._ignored)
             self._populate(self._rows)
+        elif action == large_action:
+            self._show_largest(info)
         elif action == open_action:
             subprocess.run(["open", str(project_path)])
         elif action == term_action:
