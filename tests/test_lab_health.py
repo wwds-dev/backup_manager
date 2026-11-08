@@ -177,16 +177,123 @@ def test_rebuild_command(tmp_path):
 
 
 def test_classify_item_idle_and_rebuild_gates(tmp_path):
-    proj = tmp_path / "p"; (proj / ".venv").mkdir(parents=True)
+    proj = tmp_path / "p"; (proj / ".venv").mkdir(parents=True); (proj / "build").mkdir()
     (proj / "pyproject.toml").write_text("")
+    now = 1_000_000_000.0
+    old, recent = now - (lh.ENV_IDLE_DAYS + 1) * 86400, now - 86400
     junk = lh.classify_item(proj, proj / "__pycache__", 5, 0)
     assert junk["kind"] == "junk" and junk["eligible"]              # safe even if active
-    assert not lh.classify_item(proj, proj / ".venv", 5, lh.IDLE_DAYS - 1)["eligible"]
-    assert not lh.classify_item(proj, proj / ".venv", 5, None)["eligible"]
-    assert lh.classify_item(proj, proj / ".venv", 5, lh.IDLE_DAYS)["eligible"]
+    venv = lambda **kw: lh.classify_item(proj, proj / ".venv", 5, 0, now=now, **kw)  # noqa: E731
+    # an env unused for a week is offered even though the project was active today
+    assert venv(last_use=old)["eligible"]
+    r = venv(last_use=recent)
+    assert not r["eligible"] and "used 1 day ago" in r["reason"]
+    assert not venv(last_use=None)["eligible"]
+    busy = venv(last_use=old, users=["running process python (pid 7)"])
+    assert not busy["eligible"] and "in use" in busy["reason"] and "pid 7" in busy["reason"]
+    # build/dist keep the project-idle rule
+    assert not lh.classify_item(proj, proj / "build", 5, lh.IDLE_DAYS - 1)["eligible"]
+    assert not lh.classify_item(proj, proj / "build", 5, None)["eligible"]
+    assert lh.classify_item(proj, proj / "build", 5, lh.IDLE_DAYS)["eligible"]
     (proj / "pyproject.toml").unlink()
-    locked = lh.classify_item(proj, proj / ".venv", 5, 365)
+    locked = venv(last_use=old)
     assert not locked["eligible"] and "rebuilt" in locked["reason"]
+
+
+def test_env_last_use_reads_bin_and_cfg(tmp_path):
+    env = tmp_path / ".venv"; (env / "bin").mkdir(parents=True)
+    (env / "bin" / "python").write_text(""); (env / "pyvenv.cfg").write_text("")
+    for p in (env / "bin" / "python", env / "bin", env / "pyvenv.cfg"):
+        os.utime(p, (100, 100))
+    os.utime(env / "bin" / "python", (100, 5000))
+    assert lh.env_last_use(env) == 5000
+    assert lh.env_last_use(tmp_path / "nothing") is None
+
+
+def test_env_users_process_launchd_and_app(tmp_path):
+    proj = tmp_path / "sonar"; env = proj / ".venv"; (env / "bin").mkdir(parents=True)
+    other = tmp_path / "sonar-old" / ".venv"; other.mkdir(parents=True)
+    procs = [(11, "python", f"{env}/bin/python main.py"),
+             (12, "Python", f"{env}/lib/python3.12/site-packages/x.so"),
+             (12, "Python", f"{env}/lib/y.so"),                 # same pid counted once
+             (13, "python", f"{other}/bin/python")]              # prefix is not a match
+    jobs = {"com.x.sonar.plist": [f"{env}/bin/python", "-m", "sonar"],
+            "com.x.script.plist": [f"{proj}/run.sh"],
+            "com.x.unrelated.plist": [str(tmp_path)]}
+    apps = {"Sonar": str(proj.resolve()), "Other": str(tmp_path / "x")}
+    users = lh.env_users(env, proj, procs, jobs, apps)
+    assert sum("pid 11" in u for u in users) == 1 and sum("pid 12" in u for u in users) == 1
+    assert not any("pid 13" in u for u in users)
+    assert "launchd job com.x.sonar.plist" in users
+    assert any("com.x.script.plist" in u and "this project" in u for u in users)
+    assert not any("unrelated" in u for u in users)
+    assert "Sonar.app (launches from this checkout)" in users and len(users) == 5
+    # node_modules is not what Lab Hub apps launch, and a project script is not its user
+    nm = proj / "node_modules"; nm.mkdir()
+    assert lh.env_users(nm, proj, [], jobs, apps) == []
+    assert lh.env_users(other, other.parent, procs[:3], jobs, apps) == []
+
+
+def test_launchd_jobs_and_app_roots(tmp_path):
+    import plistlib
+    d = tmp_path / "agents"; d.mkdir()
+    (d / "a.plist").write_bytes(plistlib.dumps(
+        {"Label": "a", "ProgramArguments": ["/p/.venv/bin/python", "x.py"]}, fmt=plistlib.FMT_BINARY))
+    (d / "broken.plist").write_text("not a plist /q/.venv")
+    jobs = lh.launchd_jobs([d, tmp_path / "missing"])
+    assert "/p/.venv/bin/python" in jobs["a.plist"] and "/q/.venv" in jobs["broken.plist"][0]
+    res = tmp_path / "Apps" / "Sonar.app" / "Contents" / "Resources"; res.mkdir(parents=True)
+    (res / "project_root.txt").write_text(f"{tmp_path}\n")
+    assert lh.app_project_roots(tmp_path / "Apps") == {"Sonar": os.path.realpath(tmp_path)}
+
+
+def test_manifest_hash_and_duplicates(tmp_path):
+    rows = []
+    for name, mtime, reqs in (("imprint", 300, "b==2\na==1\n"),
+                              ("imprint-base", 100, "# pinned\na==1\nb==2\n"),
+                              ("imprint-deps", 200, "a==1\nb==2"), ("solo", 50, "c==3")):
+        p = tmp_path / name; (p / ".venv").mkdir(parents=True)
+        (p / "requirements.txt").write_text(reqs)
+        item = lh.classify_item(p, p / ".venv", 5, 0, last_use=mtime, now=10**7)
+        item["manifest_hash"] = lh.manifest_hash(p, p / ".venv")
+        rows.append({"items": [item]})
+    hashes = {r["items"][0]["manifest_hash"] for r in rows[:3]}
+    assert len(hashes) == 1 and next(iter(hashes)).startswith("requirements.txt:")
+    lh.mark_duplicates(rows)
+    imprint, base, deps, solo = (r["items"][0] for r in rows)
+    assert base["oldest"] and not imprint["oldest"] and not deps["oldest"]
+    assert len(base["duplicates"]) == 2 and "duplicates" not in solo
+    line = lh.env_tooltip_line(base, "1.5 GB", now=100 + 3 * 86400)
+    assert "same manifest as" in line and "oldest copy" in line and "last used 3 days" in line
+    assert "rebuild: pip install -r requirements.txt" in line
+    # drifted pins: no exact match, but the same package list still groups them
+    a, b = tmp_path / "a", tmp_path / "b"
+    for p, reqs, t in ((a, "Foo_Bar==1\nbaz>=2\n", 10), (b, "foo-bar==3\nbaz==2.5\n", 20)):
+        (p / ".venv").mkdir(parents=True); (p / "requirements.txt").write_text(reqs)
+    ia, ib = ({"kind": "env", "path": p / ".venv", "last_use": t, "eligible": True,
+               "manifest_hash": lh.manifest_hash(p, p / ".venv"),
+               "package_set_hash": lh.package_set_hash(p, p / ".venv")}
+              for p, t in ((a, 10), (b, 20)))
+    assert ia["manifest_hash"] != ib["manifest_hash"]
+    lh.mark_duplicates([{"items": [ia, ib]}])
+    assert ia["oldest"] and ia["dup_kind"] == "same packages, other versions"
+    ia["eligible"] = False; del ia["duplicates"]; del ib["duplicates"]
+    lh.mark_duplicates([{"items": [ia, ib]}])
+    assert not ia["oldest"] and ib["oldest"]                     # a locked env is never "remove this"
+    assert lh.manifest_hash(a, a / "build") is None                # build/dist never grouped
+    (tmp_path / "solo" / "uv.lock").write_text("x")             # uv.lock wins
+    assert lh.manifest_hash(tmp_path / "solo", tmp_path / "solo" / ".venv").startswith("uv.lock:")
+    assert lh.manifest_hash(tmp_path, tmp_path / ".venv") is None
+
+
+def test_card_env_tooltip_shows_users_and_rebuild(card):
+    used = _item(Path("/x/sonar/.venv"), kb=5, eligible=False)
+    used.update(reason="in use: Sonar.app (launches from this checkout)",
+                users=["Sonar.app (launches from this checkout)"])
+    free = _item(Path("/x/sonar/node_modules"), kb=3, rebuild="npm ci")
+    card._populate([_row("sonar", reclaim_kb=8, items=[used, free])])
+    tip = card.table.item(0, 1).toolTip()
+    assert "Sonar.app" in tip and "rebuild: uv sync" in tip and "rebuild: npm ci" in tip
 
 
 def test_idle_days_ignores_caches_and_ds_store(tmp_path):
@@ -234,3 +341,59 @@ def test_git_label_plain_folder_not_red():
     assert lh.git_label(False, 0, "—", external=True) == ("plain folder", "#6b7280")
     assert lh.git_label(False, 0, "—", external=False)[1] == "#dc2626"
     assert lh.git_label(True, 2, "—", False)[0] == "2 uncommitted"
+
+
+# --- Commit warnings and multi-select commit -----------------------------------
+
+def _repo(p):
+    _git(p, "init", "-q"); _git(p, "config", "user.email", "t@t"); _git(p, "config", "user.name", "t")
+    (p / "a.txt").write_text("a"); _git(p, "add", "-A"); _git(p, "commit", "-qm", "init")
+
+
+def test_commit_warnings_clean_repo(tmp_path):
+    _repo(tmp_path)
+    (tmp_path / "b.txt").write_text("b")
+    assert lh.commit_warnings(tmp_path) == []
+
+
+def test_commit_warnings_flags_risks(tmp_path):
+    _repo(tmp_path)
+    (tmp_path / ".env").write_text("X=1")
+    (tmp_path / ".env.example").write_text("X=")
+    (tmp_path / "node_modules" / "p").mkdir(parents=True)
+    (tmp_path / "node_modules" / "p" / "i.js").write_text("x")
+    (tmp_path / "big.bin").write_bytes(b"0" * (lh.BIG_FILE_MB * 1024 * 1024 + 1))
+    w = "\n".join(lh.commit_warnings(tmp_path))
+    assert ".env" in w and ".env.example" not in w
+    assert "node_modules" in w and "big.bin" in w
+
+
+def test_commit_warnings_mid_merge_and_detached(tmp_path):
+    _repo(tmp_path)
+    _git(tmp_path, "checkout", "-q", "--detach")
+    (tmp_path / ".git" / "MERGE_HEAD").write_text("x")
+    (tmp_path / "c.txt").write_text("c")
+    w = "\n".join(lh.commit_warnings(tmp_path))
+    assert "merge" in w.lower() and "Detached" in w
+
+
+def test_commit_targets_all_dirty_selected_rows():
+    rows = [_row("a", uncommitted=2), _row("b"), _row("c", uncommitted=1),
+            _row("d", uncommitted=4, external=True), _row("e", has_git=False)]
+    assert [r["name"] for r in lh.commit_targets(rows, [0, 1, 2, 3, 4])] == ["a", "c"]
+    assert lh.commit_targets(rows, []) == []
+
+
+def test_select_all_dirty_checkbox(card, monkeypatch):
+    card._populate([_row("a", uncommitted=2), _row("b"), _row("c", uncommitted=1)])
+    card.sel_dirty.setChecked(True)
+    assert card._selected_rows() == [0, 2]
+    assert card.commit_btn.isEnabled() and "2 projects" in card.commit_btn.text()
+    seen = []
+    monkeypatch.setattr(card, "commit_projects", lambda infos: seen.append([i["name"] for i in infos]))
+    card._commit_selected()
+    assert seen == [["a", "c"]]
+    card.table.selectRow(0)
+    assert not card.sel_dirty.isChecked()
+    card.sel_dirty.setChecked(True); card.sel_dirty.setChecked(False)
+    assert card._selected_rows() == []

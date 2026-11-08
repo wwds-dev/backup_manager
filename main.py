@@ -39,7 +39,7 @@ if "--run-backup" in sys.argv:
 import signal as _signal
 from PySide6.QtCore import (
     Qt, QFile, QThread, Signal, QProcess, QTimer, QProcessEnvironment, QEvent,
-    QFileSystemWatcher, QPointF, QRect, QSize, QPoint, QObject,
+    QFileSystemWatcher, QPointF, QRect, QSize, QPoint, QObject, QItemSelectionModel,
 )
 from PySide6.QtGui import QTextCursor, QColor, QIcon, QPixmap, QPainter, QPen, QPolygonF
 from PySide6.QtNetwork import QNetworkInformation
@@ -1081,20 +1081,34 @@ class LabHealthWorker(QThread):
     def run(self):
         rows = []
         if LAB_ACTIVE.exists():
+            # One snapshot of what could be running from an env, shared by every project.
+            usage = (lab_health.process_snapshot(), lab_health.launchd_jobs(),
+                     lab_health.app_project_roots())
             for proj in sorted(LAB_ACTIVE.iterdir()):
                 if proj.is_dir() and not proj.name.startswith("."):
-                    rows.append(self._scan_project(proj))
+                    rows.append(self._scan_project(proj, usage))
+            lab_health.mark_duplicates(rows)
         self.done.emit(rows)
 
     @classmethod
-    def _scan_project(cls, proj):
+    def _scan_project(cls, proj, usage=((), {}, {})):
         link = proj
         external = lab_health.is_external(link, LAB_ACTIVE)
         proj = proj.resolve()   # lab/active holds symlinks to out-of-tree projects
         total_kb = cls._size_kb(proj)
         idle = lab_health.idle_days(proj)
-        items = [lab_health.classify_item(proj, p, cls._size_kb(p), idle)
-                 for p in cls._find_disposable(proj)]
+        procs, jobs, apps = usage
+        items = []
+        for p in cls._find_disposable(proj):
+            is_env = p.name in lab_health.ENV_NAMES
+            item = lab_health.classify_item(
+                proj, p, cls._size_kb(p), idle,
+                users=lab_health.env_users(p, proj, procs, jobs, apps) if is_env else None,
+                last_use=lab_health.env_last_use(p) if is_env else None)
+            if is_env:
+                item["manifest_hash"] = lab_health.manifest_hash(proj, p)
+                item["package_set_hash"] = lab_health.package_set_hash(proj, p)
+            items.append(item)
         reclaim_kb = sum(i["kb"] for i in items)
 
         has_git = (proj / ".git").exists()
@@ -1107,6 +1121,12 @@ class LabHealthWorker(QThread):
             last_commit = out2.strip() or "—"
 
         manifest = lab_health.manifest_status(proj)
+        warnings = []
+        if has_git and uncommitted and not external:
+            try:
+                warnings = lab_health.commit_warnings(proj)
+            except Exception:
+                warnings = []
 
         env_flag = ""
         if (proj / ".env").exists():
@@ -1129,6 +1149,7 @@ class LabHealthWorker(QThread):
             "manifest": manifest,
             "env_flag": env_flag,
             "external": external,
+            "commit_warnings": warnings,
         }
 
     @staticmethod
@@ -2691,9 +2712,11 @@ class LabHealthCard(Card):
             "This is not row selection: click a project name to select it.")
         self.table.horizontalHeaderItem(1).setToolTip(
             f"Tick to move this project's environments (.venv, node_modules, build, dist) to "
-            f"the Trash. Offered only when the project has been idle {lab_health.IDLE_DAYS}+ "
-            f"days and the environment can be rebuilt from a lockfile or manifest (\U0001F512 = "
-            f"not offered; hover for why).")
+            f"the Trash. A .venv / node_modules is offered once it has been unused "
+            f"{lab_health.ENV_IDLE_DAYS}+ days and nothing runs from it (process, launchd job, "
+            f"app); build / dist once the project has been idle {lab_health.IDLE_DAYS}+ days. "
+            f"Either way it must be rebuildable from a lockfile or manifest (\U0001F512 = not "
+            f"offered; hover for why, what uses it, and duplicates).")
         self.table.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.columns = ResizableColumns(
             self.table, "lab_health",
@@ -2713,8 +2736,14 @@ class LabHealthCard(Card):
         clean = secondary_button("🧹 Clean up checked")
         clean.clicked.connect(self.clean_checked)
         commit = secondary_button("✅ Commit selected…")
-        commit.setToolTip("Select a project with uncommitted changes, then commit it "
-                          "(gitleaks scans the changes first). Right-click a row for more.")
+        commit.setToolTip("Select one or more projects with uncommitted changes, then commit "
+                          "them (gitleaks scans the changes first, and risky ones are "
+                          "flagged before anything is committed). Right-click a row for more.")
+        self.sel_dirty = QCheckBox("Select all with uncommitted changes")
+        self.sel_dirty.setToolTip("Selects every project that has uncommitted changes, so "
+                                  "\u201cCommit\u201d acts on all of them. Nothing is committed "
+                                  "until you confirm.")
+        self.sel_dirty.toggled.connect(self._toggle_dirty)
         commit.clicked.connect(self._commit_selected)
         commit.setEnabled(False)
         self.commit_btn = commit
@@ -2725,6 +2754,7 @@ class LabHealthCard(Card):
                           "(idle project, rebuildable). Click again to clear.")
         select.clicked.connect(self.toggle_safe)
         row.addWidget(rescan)
+        row.addWidget(self.sel_dirty)
         row.addWidget(commit)
         row.addWidget(select)
         row.addWidget(clean)
@@ -2737,8 +2767,9 @@ class LabHealthCard(Card):
         hint = QLabel(
             "Nothing is ticked by default. Caches regenerate by themselves and are deleted "
             "for good. Environments (.venv, node_modules, build, dist) go to the Trash and "
-            "are offered only for projects idle "
-            f"{lab_health.IDLE_DAYS}+ days that have a lockfile or manifest to rebuild from; "
+            f"are offered once unused {lab_health.ENV_IDLE_DAYS}+ days with nothing running "
+            f"from them (build/dist: project idle {lab_health.IDLE_DAYS}+ days), and only "
+            "with a lockfile or manifest to rebuild from; "
             "empty the Trash to free the space. Code, git history, uncommitted changes and "
             ".env files are never touched.")
         hint.setObjectName("CardSubtitle")
@@ -2799,18 +2830,19 @@ class LabHealthCard(Card):
             if env_kb > 0 and not external:
                 env_chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
                 env_chk.setCheckState(Qt.Unchecked)
-                env_chk.setText(human_size(env_kb * 1024))
+                env_chk.setText(human_size(env_kb * 1024)
+                                + (" (+\U0001F512)" if env_locked else ""))
                 env_chk.setToolTip("\n".join(
-                    f"{i['path'].name}: {human_size(i['kb'] * 1024)}. Moved to Trash; "
-                    f"rebuild with: {i['rebuild']}" for i in env_ok))
+                    lab_health.env_tooltip_line(i, human_size(i["kb"] * 1024))
+                    for i in env_ok + env_locked))
             else:
                 env_chk.setFlags(Qt.ItemIsSelectable)
                 if env_locked and not external:
                     env_chk.setText("\U0001F512 " + human_size(
                         sum(i["kb"] for i in env_locked) * 1024))
                     env_chk.setForeground(QColor("#6b7280"))
-                    env_chk.setToolTip("Not offered:\n" + "\n".join(
-                        f"{i['path'].name} ({human_size(i['kb'] * 1024)}): {i['reason']}"
+                    env_chk.setToolTip("\n".join(
+                        lab_health.env_tooltip_line(i, human_size(i["kb"] * 1024))
                         for i in env_locked))
             if external:
                 env_all = sum(i["kb"] for i in items if i["kind"] == "env")
@@ -2841,13 +2873,17 @@ class LabHealthCard(Card):
                 idle_item.setForeground(QColor(
                     "#16a34a" if idle >= lab_health.IDLE_DAYS else "#d97706"))
             idle_item.setToolTip("Days since the last commit or source-file edit. "
-                                 f"Environments are offered after {lab_health.IDLE_DAYS}.")
+                                 f"build / dist are offered after {lab_health.IDLE_DAYS}; "
+                                 ".venv / node_modules go by their own last use.")
             self.table.setItem(r, 4, idle_item)
 
             git_text, git_color = lab_health.git_label(
                 row["has_git"], row["uncommitted"], row["last_commit"], external)
-            git_item = QTableWidgetItem(git_text)
+            warn = row.get("commit_warnings") or []
+            git_item = QTableWidgetItem(git_text + (" \u26a0" if warn else ""))
             git_item.setForeground(QColor(git_color))
+            if warn:
+                git_item.setToolTip("Check before committing:\n\u2022 " + "\n\u2022 ".join(warn))
             self.table.setItem(r, 5, git_item)
 
             ignored = row["name"] in self._ignored
@@ -2867,8 +2903,8 @@ class LabHealthCard(Card):
         self.summary_lbl.setText(
             f"{human_size(total_reclaim_kb * 1024)} reclaimable: "
             f"{human_size(safe_kb * 1024)} safe to clean now, "
-            f"{human_size(locked_kb * 1024)} locked (environments of recently active "
-            f"projects, or without a lockfile)"
+            f"{human_size(locked_kb * 1024)} locked (in use, used within the last "
+            f"{lab_health.ENV_IDLE_DAYS} days, or without a lockfile; hover the lock for why)"
         )
         self._update_ticked()
 
@@ -2914,33 +2950,104 @@ class LabHealthCard(Card):
     def _selected_rows(self):
         return sorted({i.row() for i in self.table.selectionModel().selectedRows()})
 
-    def _commit_target(self):
-        return lab_health.commit_target(self._rows, self._selected_rows())
+    def _commit_targets(self):
+        return lab_health.commit_targets(self._rows, self._selected_rows())
+
+    def _dirty_rows(self):
+        return [i for i, r in enumerate(self._rows)
+                if r.get("has_git") and r.get("uncommitted") and not r.get("external")]
+
+    def _toggle_dirty(self, on):
+        self.table.blockSignals(True)
+        self.table.clearSelection()
+        if on:
+            sm = self.table.selectionModel()
+            for r in self._dirty_rows():
+                sm.select(self.table.model().index(r, 0),
+                          QItemSelectionModel.Select | QItemSelectionModel.Rows)
+        self.table.blockSignals(False)
+        self._update_commit_button()
 
     def _update_commit_button(self):
-        info = self._commit_target()
-        self.commit_btn.setEnabled(info is not None)
-        self.commit_btn.setText(f"✅ Commit {info['name']}…" if info else "✅ Commit selected…")
+        infos = self._commit_targets()
+        self.commit_btn.setEnabled(bool(infos))
+        if len(infos) == 1:
+            self.commit_btn.setText(f"✅ Commit {infos[0]['name']}…")
+        elif infos:
+            self.commit_btn.setText(f"✅ Commit {len(infos)} projects…")
+        else:
+            self.commit_btn.setText("✅ Commit selected…")
+        dirty = self._dirty_rows()
+        self.sel_dirty.blockSignals(True)
+        self.sel_dirty.setChecked(bool(dirty) and self._selected_rows() == dirty)
+        self.sel_dirty.setEnabled(bool(dirty))
+        self.sel_dirty.blockSignals(False)
 
     def _commit_selected(self):
-        info = self._commit_target()
-        if info is not None:
-            self.commit_project(info)
+        infos = self._commit_targets()
+        if len(infos) == 1:
+            self.commit_project(infos[0])
+        elif infos:
+            self.commit_projects(infos)
 
     def commit_project(self, info):
+        warn = lab_health.commit_warnings(Path(info["path"]))
+        shown = ("\n\n\u26a0 Check before committing:\n\u2022 " + "\n\u2022 ".join(warn)) if warn else ""
         text, ok = QInputDialog.getText(
             self, f"Commit {info['name']}",
             f"Project: {info['name']}\n{info['path']}\n\n"
             f"{info['uncommitted']} changed file(s) will be staged, scanned with gitleaks "
-            "and committed.\n\nCommit message:",
+            f"and committed.{shown}\n\nCommit message:",
             text=f"{info['name']}: checkpoint {datetime.now():%Y-%m-%d}")
         if not ok:
+            return
+        if warn and QMessageBox.warning(
+                self, "Commit anyway?",
+                "\u2022 " + "\n\u2022 ".join(warn) + "\n\nCommit anyway?",
+                QMessageBox.Yes | QMessageBox.Cancel, QMessageBox.Cancel) != QMessageBox.Yes:
             return
         done, out = lab_health.commit_all(Path(info["path"]), text)
         if done:
             QMessageBox.information(self, "Committed", out.splitlines()[0] if out else "Done.")
         else:
             QMessageBox.warning(self, "Not committed", out)
+        self.rescan()
+
+    def commit_projects(self, infos):
+        """Commit several projects, each with its own default message. Projects with
+        warnings can be skipped, so one risky repo never rides along unseen."""
+        warned = {i["name"]: lab_health.commit_warnings(Path(i["path"])) for i in infos}
+        risky = [i for i in infos if warned[i["name"]]]
+        lines = []
+        for i in infos:
+            lines.append(f"  {i['name']}  ({i['uncommitted']} files)")
+            lines += [f"      \u26a0 {w}" for w in warned[i["name"]]]
+        box = QMessageBox(self)
+        box.setWindowTitle("Commit projects")
+        box.setIcon(QMessageBox.Warning if risky else QMessageBox.Question)
+        box.setText(f"Commit {len(infos)} projects? Each is staged, scanned with gitleaks "
+                    f"and committed as \u201c<project>: checkpoint {datetime.now():%Y-%m-%d}\u201d.\n\n"
+                    + "\n".join(lines))
+        clean_btn = box.addButton("Commit only without warnings", QMessageBox.AcceptRole) \
+            if risky and len(risky) < len(infos) else None
+        all_btn = box.addButton("Commit all anyway" if risky else "Commit all",
+                                QMessageBox.DestructiveRole if risky else QMessageBox.AcceptRole)
+        cancel = box.addButton(QMessageBox.Cancel)
+        box.setDefaultButton(clean_btn or cancel)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is clean_btn and clean_btn is not None:
+            infos = [i for i in infos if not warned[i["name"]]]
+        elif clicked is not all_btn:
+            return
+        results = []
+        for i in infos:
+            done, out = lab_health.commit_all(
+                Path(i["path"]), f"{i['name']}: checkpoint {datetime.now():%Y-%m-%d}")
+            mark = "\u2713" if done else "\u2717"
+            reason = "" if done else ": " + (out.splitlines()[0] if out else "failed")
+            results.append(f"{mark} {i['name']}{reason}")
+        QMessageBox.information(self, "Commit results", "\n".join(results))
         self.rescan()
 
     def _ticked(self, col):
