@@ -5,14 +5,48 @@ backup (the rsync job in `_Admin/backup/`).
 
 ## What it does
 
-Single-screen, scrollable dashboard with seven cards plus a menu-bar icon. Launches
-maximized. The **☀/🌙** and **⚙** buttons live in the top-right of the header.
+One window with a **left sidebar** plus a menu-bar icon. The sidebar's pages, top to
+bottom: **Overview**, **Storage**, **Backed-up folders** (the Google Drive backup and its
+folder list), **Lab Health**, **Time Machine**, **History**, and **Settings** at the bottom
+(app settings plus Tools & Links). A top bar shows the page title, **🔄 Refresh all** and
+the **☀/🌙** theme toggle. The window opens at up to 1340 × 860 and never asks for more
+than the screen has (minimum width 1230: the old 1020 page plus the sidebar).
 
 **Scrolling** works like Safari: each scroll gesture goes to one place for its whole
 length. The backup log takes the scroll only when the gesture *starts* over it and it can
 still move that way; otherwise the page scrolls, and keeps scrolling when the pointer
 drifts over the log. The folder list and the Lab Health table are sized to show every
-row, so they never scroll inside the page.
+row, so they never scroll inside the page. Each page scrolls on its own.
+
+---
+
+### Overview
+The page the window opens on. It measures nothing itself: it reads the other pages'
+cards and git_autosync's state files.
+
+- **Status banner**: green **Your Mac is protected** when every backup job is fine,
+  amber when one needs attention, red when one is broken or badly behind (no Drive
+  backup for 72 h, Time Machine more than 7 days old). One line sums up the Drive backup,
+  Time Machine, git_autosync and how many projects have uncommitted work. **Back up now**
+  runs the Google Drive backup (same as **▶ Run backup now**).
+- **Storage gauges**: Mac disk, Google Drive, Dropbox and iCloud, each with % used and a
+  fill bar: green, amber at 70 %, red at 90 % (the Storage tiles' thresholds). A service
+  not set up on this Mac shows "—".
+- **Backup jobs**, each with its schedule or last result and a status pill:
+  - **Google Drive mirror**: nightly time and the last good copy's age. Up to date within
+    25 h (the menu-bar icon's line), Overdue after that, Errors when the last run failed.
+  - **Time Machine**: last backup's age. Up to date within 48 h; Not set up, Disk away
+    or Behind otherwise.
+  - **git_autosync**: read from `~/Library/Application Support/git_autosync/`:
+    `last_status.txt` (`ok` / `attention`), `last_success.txt` for the last clean run,
+    and its loaded LaunchAgents (`…git-autosync`, `…-hourly`) for the schedule. Needs
+    attention when git_autosync says so (a repo blocked by gitleaks, an error, or an
+    unlisted repo). Re-read every minute.
+- **Needs attention**: one row per problem with one button: a blocked or failed
+  git_autosync run (**Open git_autosync**), a late or failed Drive backup (**History**),
+  Time Machine not set up or behind, projects with uncommitted changes (**Review**, to Lab
+  Health), and caches or idle envs worth over 100 MB (**Clean up**, to Lab Health, where
+  you tick and confirm as before).
 
 ---
 
@@ -34,7 +68,7 @@ reconnects to the network.
 ---
 
 ### Google Drive Backup
-Last run timestamp, status (OK / WITH ERRORS), and a live log pre-populated with the
+On the **Backed-up folders** page, above the folder list. Last run timestamp, status (OK / WITH ERRORS), and a live log pre-populated with the
 last 60 lines of the most recent run so status is visible without triggering a new backup.
 
 **Controls:**
@@ -45,14 +79,14 @@ last 60 lines of the most recent run so status is visible without triggering a n
 | **⏸ Pause / ▶ Resume** | Suspends or resumes the running rsync process (SIGSTOP/SIGCONT) — useful when bandwidth is needed mid-backup |
 | **⚟ Dry run** | Previews what rsync would copy — no files changed; writes to `dryrun_*.log` so it never confuses the auto-backup detector |
 | **🗑 Preview deletions** | Lists what mirror mode would remove from Drive, and changes nothing. Run this before turning mirroring on |
-| **📋 History** | Last 15 runs: date, start time, duration, bytes transferred, colour-coded status, and a **📄 View log** button for the selected row |
+| **📋 History** | Last 15 runs: date, start time, duration, bytes transferred, colour-coded status, and a **📄 View log** button for the selected row. The same table is the **History** page, which reloads after every run |
 | **■ Stop** | Kills the running backup or dry run |
 
 **Toggles:**
 
 | Toggle | Effect |
 |---|---|
-| **🕒 Nightly schedule** | Enables the in-app auto-backup timer (time is configurable in ⚙ Settings) |
+| **🕒 Nightly schedule** | Enables the in-app auto-backup timer (time is configurable on the Settings page) |
 | **⏰ Wake Mac** | `pmset` wake schedule set 5 min before the backup time — **required** for overnight backups when the Mac sleeps. If the backup time changes later, the row shows the old wake time and the button reads **Update** |
 | **🚀 Open at login (menu bar only)** | Installs a LaunchAgent that opens the app with `--background` at login — menu-bar icon only, no window and no dock tile (see *Starting at login* below) |
 | **🌐 Network trigger** | Label showing whether the network-reconnect trigger loaded successfully |
@@ -146,7 +180,7 @@ Last backup date, idle/running status (with phase and percent while running), an
 ---
 
 ### Tools & Links
-Quick launchers and helpers:
+On the **Settings** page, below the app settings. Quick launchers and helpers:
 
 - **Open locations** — backup destination, logs directory, CloudStorage, iCloud Drive,
   Time Machine settings.
@@ -154,7 +188,7 @@ Quick launchers and helpers:
   Proton Vault Guide, and Lab Overview.
 - **Account pages** — Google One, Dropbox, Proton, iCloud storage pages.
 - **Tools** — Google Photos Takeout guide, Proton vault mount check, Time Machine
-  back up now (quick shortcut; the full card above has richer status).
+  back up now (quick shortcut; the Time Machine page has richer status).
 
 ---
 
@@ -211,12 +245,15 @@ See Single-instance guard below.
 
 ### Dark mode & theme toggle
 Matches system light/dark appearance at launch and updates live when the appearance
-changes. The **☀/🌙** button in the header overrides the theme for the current session
+changes. The **☀/🌙** button in the top bar overrides the theme for the current session
 without touching system settings.
 
 ---
 
-### Settings (⚙)
+### Settings
+The **Settings** page at the bottom of the sidebar shows the current values; **Edit
+settings…** opens the dialog. Tools & Links sits below.
+
 | Setting | Effect |
 |---|---|
 | **Hide to menu bar on close** | Closing the window hides the app instead of quitting; use Quit from the menu-bar icon to fully exit |
@@ -241,7 +278,7 @@ inside it, so rsync never walks its own archive. Prune those dated folders occas
 or they become the thing that grows forever instead.
 
 1. **🗑 Preview deletions** — shows every file mirroring would remove. Changes nothing.
-2. If the list looks right, enable **Mirror mode** in ⚙ Settings.
+2. If the list looks right, enable **Mirror mode** on the Settings page (**Edit settings…**).
 
 From the command line the same two steps are:
 
@@ -274,7 +311,7 @@ removed `spctl --add` and Gatekeeper blocks unsigned apps in non-interactive lau
 contexts.
 
 **Recommended setup:**
-1. Set the backup time in **⚙ Settings** (default 03:30).
+1. Set the backup time on the **Settings** page (default 03:30).
 2. Enable **🕒 Nightly schedule**.
 3. Enable **⏰ Wake Mac** so the Mac powers on 5 minutes before the scheduled time.
 4. Enable **🚀 Open at login (menu bar only)** so the app is running when the Mac wakes.
@@ -476,7 +513,9 @@ dropped.
 The rest: `test_lab_health.py` (Lab Health rules in `lab_health.py`),
 `test_login_agent.py` (Open at login LaunchAgent), `test_tile_windows.py` (tiles never
 escape as windows), `test_resizable_columns.py`, `test_scroll_latching.py`,
-`test_time_machine.py` (`tmutil` parsing) and `test_wake_schedule.py` (`pmset` parsing).
+`test_time_machine.py` (`tmutil` parsing), `test_wake_schedule.py` (`pmset` parsing) and
+`test_overview.py` (the Overview's rules: storage thresholds, git_autosync state files,
+job pills, the banner, the Lab Health summary, plus the gauge widget).
 
 ## Backlog
 - **Developer ID code signing** — eliminates the need to re-grant FDA after each rebuild

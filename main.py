@@ -49,7 +49,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit, QFrame, QScrollArea, QProgressBar,
     QGraphicsDropShadowEffect, QSizePolicy, QLineEdit, QFormLayout, QComboBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QSystemTrayIcon, QMenu, QCheckBox, QSpinBox,
-    QLayout, QAbstractScrollArea, QInputDialog,
+    QLayout, QAbstractScrollArea, QInputDialog, QStackedWidget, QButtonGroup,
 )
 
 import cloud_quota
@@ -191,6 +191,22 @@ def make_spin(spin=None):
     return spin
 
 
+# Accent and status colours of the sidebar layout, keyed by dark mode. The green
+# is git_autosync's accent, so the two apps read as one family.
+LEVEL_COLORS = {
+    False: {"accent": "#0d6e5c", "accent_hover": "#0a5a4b", "accent_tint": "rgba(13, 110, 92, 31)",
+            "ok": "#0d6e5c", "ok_tint": "rgba(13, 110, 92, 20)",
+            "warn": "#B25E00", "warn_tint": "rgba(255, 149, 0, 36)",
+            "bad": "#D70015", "bad_tint": "rgba(255, 59, 48, 28)",
+            "info": "#0062CC", "info_tint": "rgba(0, 122, 255, 28)"},
+    True: {"accent": "#3FB59A", "accent_hover": "#57C4AA", "accent_tint": "rgba(63, 181, 154, 46)",
+           "ok": "#3FB59A", "ok_tint": "rgba(63, 181, 154, 36)",
+           "warn": "#FFB340", "warn_tint": "rgba(255, 159, 10, 46)",
+           "bad": "#FF6961", "bad_tint": "rgba(255, 69, 58, 46)",
+           "info": "#64A8FF", "info_tint": "rgba(10, 132, 255, 46)"},
+}
+
+
 def build_app_style(dark: bool) -> str:
     # iOS / macOS Human Interface Guideline palette
     if dark:
@@ -222,6 +238,7 @@ def build_app_style(dark: bool) -> str:
         hdr_bg   = "#3A3A3C"
         menu_bg  = "#2C2C2E"
         menu_bdr = "#38383A"
+        side_bg  = "#232325"
     else:
         page     = "#F2F2F7"   # systemBackground (light)
         card     = "#FFFFFF"   # secondarySystemBackground (light)
@@ -251,6 +268,9 @@ def build_app_style(dark: bool) -> str:
         hdr_bg   = "#F2F2F7"
         menu_bg  = "#FFFFFF"
         menu_bdr = "#C6C6C8"
+        side_bg  = "#EBEBF0"
+    lv = LEVEL_COLORS[dark]
+    green, green_h, green_tint = lv["accent"], lv["accent_hover"], lv["accent_tint"]
 
     check_icon = _check_icon()
     arrows = _arrow_pngs(sec)
@@ -585,6 +605,129 @@ QScrollBar::handle:horizontal {{
 }}
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
     width: 0px;
+}}
+
+/* ── Window shell: sidebar, top bar, pages ──────── */
+#Sidebar {{
+    background: {side_bg};
+    border: none;
+    border-right: 1px solid {card_bdr};
+}}
+#SidebarTitle {{
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.2px;
+}}
+#SidebarVersion {{
+    color: #8E8E93;
+    font-size: 11px;
+}}
+QPushButton#NavButton {{
+    background: transparent;
+    color: {text};
+    text-align: left;
+    padding: 7px 12px;
+    border-radius: 10px;
+    font-weight: 500;
+}}
+QPushButton#NavButton:hover {{
+    background: {sec_bg};
+}}
+QPushButton#NavButton:checked {{
+    background: {green_tint};
+    color: {green};
+    font-weight: 600;
+}}
+#TopBar {{
+    background: {page};
+    border-bottom: 1px solid {list_bdr};
+}}
+#PageTitle {{
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+}}
+#PageStack {{
+    background: {page};
+}}
+#Muted {{
+    color: #8E8E93;
+    font-size: 11px;
+}}
+#SectionTitle {{
+    font-size: 13px;
+    font-weight: 600;
+}}
+QPushButton#GreenButton {{
+    background: {green};
+    color: white;
+    border-radius: 10px;
+    padding: 8px 18px;
+}}
+QPushButton#GreenButton:hover {{
+    background: {green_h};
+}}
+QPushButton#GreenButton:disabled {{
+    background: {dis_bg};
+    color: {dis_fg};
+}}
+
+/* Status banner, pills and gauge bars take a `level` property: ok, warn, bad,
+   info (running) or idle (unknown). */
+#Banner {{
+    border-radius: 12px;
+    border: 1px solid {lv["ok"]};
+    background: {lv["ok_tint"]};
+}}
+#Banner[level="warn"] {{ border-color: {lv["warn"]}; background: {lv["warn_tint"]}; }}
+#Banner[level="bad"]  {{ border-color: {lv["bad"]};  background: {lv["bad_tint"]}; }}
+#Banner[level="idle"] {{ border-color: {card_bdr};   background: {card}; }}
+#BannerIcon {{
+    font-size: 22px;
+    font-weight: 700;
+    color: {lv["ok"]};
+}}
+#BannerIcon[level="warn"] {{ color: {lv["warn"]}; }}
+#BannerIcon[level="bad"]  {{ color: {lv["bad"]}; }}
+#BannerIcon[level="idle"] {{ color: #8E8E93; }}
+#BannerTitle {{
+    font-size: 17px;
+    font-weight: 700;
+}}
+#BannerText {{
+    color: {sec};
+    font-size: 12px;
+}}
+#Pill {{
+    border-radius: 10px;
+    padding: 2px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    color: {lv["ok"]};
+    background: {lv["ok_tint"]};
+}}
+#Pill[level="warn"] {{ color: {lv["warn"]}; background: {lv["warn_tint"]}; }}
+#Pill[level="bad"]  {{ color: {lv["bad"]};  background: {lv["bad_tint"]}; }}
+#Pill[level="info"] {{ color: {lv["info"]}; background: {lv["info_tint"]}; }}
+#Pill[level="idle"] {{ color: #8E8E93;      background: {sec_bg}; }}
+#GaugeValue {{
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.4px;
+}}
+QProgressBar#GaugeBar {{
+    border: none;
+    border-radius: 4px;
+    background: {tile_bdr};
+    max-height: 8px;
+    min-height: 8px;
+}}
+QProgressBar#GaugeBar::chunk {{ border-radius: 4px; background: {green}; }}
+QProgressBar#GaugeBar[level="warn"]::chunk {{ background: {lv["warn"]}; }}
+QProgressBar#GaugeBar[level="bad"]::chunk  {{ background: {lv["bad"]}; }}
+#ListRow {{
+    border: none;
+    border-top: 1px solid {list_bdr};
 }}
 """
 
@@ -1427,6 +1570,7 @@ class StorageTile(QFrame):
         self.reconnect_btn.setVisible(False)
         layout.addWidget(self.reconnect_btn)
 
+        self.pct = None  # % used once known; the Overview gauges read it
         self.set_usage(path, exists)
 
     def _do_reconnect(self, on_connect_request):
@@ -1457,6 +1601,7 @@ class StorageTile(QFrame):
         self._tile_layout.insertWidget(bar_idx + 1, self._spark)
 
     def _set_bar(self, pct_used):
+        self.pct = pct_used
         self.bar.setValue(pct_used)
         if pct_used >= 90:
             color = "#FF453A" if _DARK else "#FF3B30"
@@ -1471,6 +1616,7 @@ class StorageTile(QFrame):
         )
 
     def set_usage(self, path, exists):
+        self.pct = None
         if not exists:
             self.bar.setValue(0)
             self.detail_lbl.setText("not mounted")
@@ -1537,6 +1683,7 @@ class StorageTile(QFrame):
 
 class ICloudTile(QFrame):
     """Storage tile that shows local iCloud cache size via du (no cloud API)."""
+    measured = Signal()  # the du finished; pct/detail are final
 
     class _Worker(QThread):
         done = Signal(object)  # int bytes or None
@@ -1584,11 +1731,16 @@ class ICloudTile(QFrame):
         open_btn.clicked.connect(lambda: run_cmd(["open", str(ICLOUD_DIR)]))
         layout.addWidget(open_btn)
 
+        self.pct = None
         self._worker = self._Worker()
         self._worker.done.connect(self._on_done)
         start_thread(self._worker)
 
     def _on_done(self, size: int | None):
+        self._apply_size(size)
+        self.measured.emit()
+
+    def _apply_size(self, size: int | None):
         bar_bg = "#48484A" if _DARK else "#E5E5EA"
         if size is None:
             self.detail_lbl.setText("Unavailable")
@@ -1602,6 +1754,7 @@ class ICloudTile(QFrame):
         usage = disk_usage_for(ICLOUD_DIR)
         if usage and usage.total > 0:
             pct = int(size * 100 / usage.total)
+            self.pct = pct
             color = ("#FF453A" if _DARK else "#FF3B30") if pct >= 90 else \
                     ("#FF9F0A" if _DARK else "#FF9500") if pct >= 70 else \
                     ("#0A84FF" if _DARK else "#007AFF")
@@ -1680,6 +1833,8 @@ class FlowLayout(QLayout):
 
 
 class StorageCard(Card):
+    updated = Signal()  # tiles rebuilt or the iCloud size arrived
+
     def __init__(self):
         super().__init__()
 
@@ -1754,8 +1909,10 @@ class StorageCard(Card):
             self.tiles.append(tile)
         # iCloud local cache size (no public API — shows local disk usage only)
         icloud_tile = ICloudTile()
+        icloud_tile.measured.connect(self.updated)
         self.tiles_row.addWidget(icloud_tile)
         self.tiles.append(icloud_tile)
+        self.updated.emit()
 
     def open_accounts_dialog(self):
         CloudAccountsDialog(self, on_change=self.refresh).exec()
@@ -2079,12 +2236,14 @@ class ExcludesDialog(QDialog):
 # ----------------------------------------------------------------------------
 # Backup history dialog
 # ----------------------------------------------------------------------------
-class BackupHistoryDialog(QDialog):
+class BackupHistoryView(QWidget):
+    """The last 15 Google Drive runs as a table, with View log. Shown on the
+    History page and inside BackupHistoryDialog."""
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Backup History")
-        self.resize(720, 380)
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
 
         self._table = QTableWidget()
         self._table.setColumnCount(5)
@@ -2097,7 +2256,18 @@ class BackupHistoryDialog(QDialog):
         self._table.setSelectionBehavior(QTableWidget.SelectRows)
         self._table.verticalHeader().setVisible(False)
         self._table.setAlternatingRowColors(True)
+        layout.addWidget(self._table)
 
+        row = QHBoxLayout()
+        self._view_btn = secondary_button("📄 View log")
+        self._view_btn.clicked.connect(self._view_log)
+        row.addWidget(self._view_btn)
+        row.addStretch()
+        layout.addLayout(row)
+        self.button_row = row
+        self.reload()
+
+    def reload(self):
         self._runs = self._parse_runs()
         self._table.setRowCount(len(self._runs))
         for r, (date, started, duration, transferred, status, _log_path) in enumerate(self._runs):
@@ -2110,18 +2280,6 @@ class BackupHistoryDialog(QDialog):
                         else QColor("#9ca3af")
                     )
                 self._table.setItem(r, c, item)
-
-        layout.addWidget(self._table)
-
-        row = QHBoxLayout()
-        self._view_btn = secondary_button("📄 View log")
-        self._view_btn.clicked.connect(self._view_log)
-        row.addWidget(self._view_btn)
-        row.addStretch()
-        close_btn = QPushButton("Close")
-        close_btn.clicked.connect(self.accept)
-        row.addWidget(close_btn)
-        layout.addLayout(row)
 
     def _view_log(self):
         rows = self._table.selectedItems()
@@ -2185,6 +2343,19 @@ class BackupHistoryDialog(QDialog):
                 if len(runs) >= 15:
                     return runs
         return runs
+
+
+class BackupHistoryDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Backup History")
+        self.resize(720, 380)
+        layout = QVBoxLayout(self)
+        self.view = BackupHistoryView(self)
+        layout.addWidget(self.view)
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        self.view.button_row.addWidget(close_btn)
 
 
 # ----------------------------------------------------------------------------
@@ -2808,6 +2979,8 @@ class FoldersCard(Card):
 
 
 class LabHealthCard(Card):
+    scanned = Signal(list)  # a scan's rows; the Overview's Needs attention reads them
+
     def __init__(self):
         super().__init__("Lab Health", "Disk usage, git status, and reclaimable space per active project")
         self.summary_lbl = QLabel("Scanning…")
@@ -2875,6 +3048,10 @@ class LabHealthCard(Card):
         self.ticked_lbl.setStyleSheet("color: #ef4444; font-weight: 600;")
         row.addWidget(self.ticked_lbl)
         row.addStretch()
+        self.body(row)
+        # Second row: with the sidebar beside it, one row of seven controls no
+        # longer fits a laptop-width window.
+        row = QHBoxLayout()
         syscache = secondary_button("🗂 Other caches…")
         syscache.setToolTip("Sizes of pip, uv, Homebrew, npm, Xcode, model and Docker caches "
                             "outside lab/active, each with the tool's own cleanup command. "
@@ -2889,6 +3066,7 @@ class LabHealthCard(Card):
         rebuild.clicked.connect(self.rebuild_missing)
         self.rebuild_btn = rebuild
         row.addWidget(rebuild)
+        row.addStretch()
         self.body(row)
 
         lab_health.apply_settings(lab_health.load_settings())
@@ -3070,6 +3248,7 @@ class LabHealthCard(Card):
         self.rescan_btn.setEnabled(True)
         self.rescan_btn.setText("🔄 Rescan")
         self._rows = rows
+        self.scanned.emit(rows)
         self._ignored = lab_health.load_ignored()
         self.table.blockSignals(True)
         self.table.setRowCount(len(rows))
@@ -3601,8 +3780,12 @@ def tm_start_backup(parent):
 
 
 class TimeMachineCard(Card):
+    updated = Signal()  # self.state changed; the Overview reads it
+
     def __init__(self):
         super().__init__("Time Machine", "Backups to your Time Machine disk")
+        # configured: disk chosen; latest: text after "Last backup: "; running.
+        self.state = {"configured": None, "latest": None, "running": False}
 
         self.last_lbl = QLabel("Checking…")
         self.body(self.last_lbl)
@@ -3634,11 +3817,14 @@ class TimeMachineCard(Card):
             self.status_lbl.setText("Status: off")
             self.backup_btn.setText("Set up Time Machine…")
             self.backup_btn.setEnabled(True)
+            self.state = {"configured": False, "latest": None, "running": False}
+            self.updated.emit()
             return
         self.backup_btn.setText("⏱ Back up now")
 
         _, out, err = run_cmd(["tmutil", "latestbackup"], timeout=10)
-        self.last_lbl.setText(f"Last backup: {describe_tm_latest(out, err)}")
+        latest = describe_tm_latest(out, err)
+        self.last_lbl.setText(f"Last backup: {latest}")
 
         _, status_xml, _ = run_cmd(["tmutil", "status", "-X"], timeout=10)
         running, phase, percent = parse_tm_status(status_xml)
@@ -3648,6 +3834,8 @@ class TimeMachineCard(Card):
         else:
             self.status_lbl.setText("Status: idle")
         self.backup_btn.setEnabled(not running)
+        self.state = {"configured": True, "latest": latest, "running": running}
+        self.updated.emit()
 
     def _start_backup(self):
         if tm_start_backup(self):
@@ -3804,7 +3992,12 @@ def fit_height_to_rows(view, min_rows=1):
     scrollbar of its own, because it is unbounded.
     """
     rows = view.model().rowCount()
-    h = 2 * view.frameWidth()
+    # Measure with the app style sheet applied: before its first polish a view
+    # reports bare-frame margins and unstyled rows, and under the app style
+    # (4 px list padding, padded items) that left a list a step short.
+    view.ensurePolished()
+    m = view.contentsMargins()
+    h = max(m.top() + m.bottom(), 2 * view.frameWidth())
     if isinstance(view, QTableWidget):
         if view.horizontalHeader().isVisibleTo(view):
             h += view.horizontalHeader().sizeHint().height()
@@ -3983,8 +4176,502 @@ class SmartScrollArea(QScrollArea):
 
 
 # ----------------------------------------------------------------------------
-# Main window
+# Overview: status rules (Qt-free, so the tests can drive them directly)
 # ----------------------------------------------------------------------------
+AUTOSYNC_STATE_DIR = HOME / "Library" / "Application Support" / "git_autosync"
+AUTOSYNC_LABEL = "git-autosync"   # launchd labels: com.<owner>.git-autosync[-hourly|-login]
+AUTOSYNC_APP = "git_autosync"
+
+DRIVE_OK_HOURS = 25          # same line as the menu-bar icon's warning badge
+DRIVE_BAD_HOURS = 72
+TM_OK_HOURS = 48
+TM_BAD_HOURS = 7 * 24
+AUTOSYNC_OK_HOURS = 48
+_LEVEL_RANK = {"ok": 0, "info": 0, "idle": 1, "warn": 2, "bad": 3}
+
+
+def usage_level(pct) -> str:
+    """Fill-bar level for a percentage used: amber from 70 %, red from 90 %."""
+    if pct is None:
+        return "idle"
+    return "bad" if pct >= 90 else "warn" if pct >= 70 else "ok"
+
+
+def worst_level(*levels) -> str:
+    return max(levels, key=lambda lv: _LEVEL_RANK.get(lv, 0)) if levels else "ok"
+
+
+def _read_stamp(path: Path):
+    """A `YYYY-MM-DD HH:MM:SS` state file -> datetime, or None."""
+    try:
+        return datetime.strptime(path.read_text().strip()[:19], "%Y-%m-%d %H:%M:%S")
+    except (OSError, ValueError):
+        return None
+
+
+def autosync_state(state_dir: Path = AUTOSYNC_STATE_DIR, launchctl_out: str | None = None) -> dict:
+    """git_autosync's own state files, plus which of its LaunchAgents are loaded.
+
+    git_autosync writes `last_status.txt` ("ok" / "attention") and the
+    `last_sync` / `last_success` / `last_backup` stamps after every real run; it
+    owns their format, this only reads them.
+    """
+    try:
+        status = (state_dir / "last_status.txt").read_text().strip().lower() or "unknown"
+    except OSError:
+        status = "unknown"
+    if launchctl_out is None:
+        _, launchctl_out, _ = run_cmd(["launchctl", "list"], timeout=15)
+    labels = {line.split()[-1] for line in launchctl_out.splitlines()
+              if AUTOSYNC_LABEL in line and line.split()}
+    return {
+        "status": status if status in ("ok", "attention") else "unknown",
+        "last_sync": _read_stamp(state_dir / "last_sync.txt"),
+        "last_success": _read_stamp(state_dir / "last_success.txt"),
+        "last_backup": _read_stamp(state_dir / "last_backup.txt"),
+        "scheduled": any(not l.endswith("-login") for l in labels),
+        "hourly": any(l.endswith("-hourly") for l in labels),
+    }
+
+
+def _hours_since(when, now=None):
+    if when is None:
+        return None
+    return ((now or datetime.now()) - when).total_seconds() / 3600
+
+
+def describe_age(hours) -> str:
+    """'just now', '3 h ago', '2 days ago' — or 'never'."""
+    if hours is None:
+        return "never"
+    if hours < 1:
+        return "just now"
+    if hours < 36:
+        return f"{int(hours)} h ago"
+    return f"{int(hours // 24)} days ago"
+
+
+def drive_job(info: str, age_h, scheduled: bool, time_str: str, running: bool = False) -> dict:
+    """The Google Drive mirror row: info is last_backup_info()'s text."""
+    when = "Nightly at " + time_str if scheduled else "Schedule off"
+    status = info.rsplit("—", 1)[-1].strip() if "—" in info else ""
+    if running:
+        return {"detail": f"{when} · running now", "pill": "Running", "level": "info"}
+    if info.startswith("No backups"):
+        return {"detail": f"{when} · never run", "pill": "Never run", "level": "bad"}
+    detail = f"{when} · last good copy {describe_age(age_h)}"
+    if status == "ERRORS":
+        return {"detail": detail, "pill": "Errors", "level": "bad"}
+    if age_h is None or age_h > DRIVE_BAD_HOURS:
+        return {"detail": detail, "pill": "Overdue", "level": "bad"}
+    if age_h > DRIVE_OK_HOURS or not scheduled:
+        return {"detail": detail, "pill": "Overdue" if age_h > DRIVE_OK_HOURS else "Manual only",
+                "level": "warn"}
+    return {"detail": detail, "pill": "Up to date", "level": "ok"}
+
+
+def tm_latest_age(latest):
+    """describe_tm_latest()'s text -> hours since, or None when it is not a date."""
+    try:
+        return _hours_since(datetime.strptime(latest or "", "%Y-%m-%d %H:%M"))
+    except ValueError:
+        return None
+
+
+def tm_job(state: dict) -> dict:
+    if state.get("configured") is None:
+        return {"detail": "Checking…", "pill": "Checking", "level": "idle"}
+    if not state["configured"]:
+        return {"detail": "No backup disk chosen", "pill": "Not set up", "level": "warn"}
+    if state.get("running"):
+        return {"detail": "Backing up now", "pill": "Running", "level": "info"}
+    latest = state.get("latest") or "none found"
+    age = tm_latest_age(latest)
+    if age is None:
+        level = "warn"
+        pill = "Disk away" if "not connected" in latest else "No backup"
+        detail = f"Last backup: {latest}"
+    else:
+        detail = f"Last backup {describe_age(age)} ({latest})"
+        level = "ok" if age <= TM_OK_HOURS else "warn" if age <= TM_BAD_HOURS else "bad"
+        pill = "Up to date" if level == "ok" else "Behind"
+    return {"detail": detail, "pill": pill, "level": level}
+
+
+def autosync_job(st: dict) -> dict:
+    if st["hourly"]:
+        when = "Hourly + nightly"
+    elif st["scheduled"]:
+        when = "Nightly"
+    else:
+        when = "Schedule off"
+    age = _hours_since(st["last_success"])
+    detail = f"{when} · last clean run {describe_age(age)}"
+    if st["status"] == "attention":
+        return {"detail": detail, "pill": "Needs attention", "level": "warn"}
+    if st["status"] == "unknown":
+        return {"detail": "No state files from git_autosync yet", "pill": "Unknown", "level": "idle"}
+    if age is None or age > AUTOSYNC_OK_HOURS:
+        return {"detail": detail, "pill": "Behind", "level": "warn"}
+    if not st["scheduled"]:
+        return {"detail": detail, "pill": "Manual only", "level": "warn"}
+    return {"detail": detail, "pill": "Synced", "level": "ok"}
+
+
+def lab_attention(rows) -> dict:
+    """Uncommitted projects and reclaimable kB from a Lab Health scan."""
+    dirty = [r["name"] for r in rows if r.get("has_git") and r.get("uncommitted")]
+    kb = 0
+    for r in rows:
+        if r.get("external"):
+            continue
+        kb += sum(i["kb"] for i in r["items"]
+                  if i["kind"] == "junk" or (i["kind"] == "env" and i["eligible"]))
+    return {"dirty": dirty, "reclaim_kb": kb}
+
+
+def protection_banner(drive: dict, tm: dict, autosync: dict, dirty_count) -> tuple:
+    """(level, headline, summary) for the Overview's status banner."""
+    level = worst_level(drive["level"], tm["level"], autosync["level"])
+    headline = {"ok": "Your Mac is protected",
+                "warn": "Your Mac is mostly protected",
+                "bad": "Your Mac is not fully protected"}.get(level, "Checking your backups…")
+    parts = [f"Drive backup: {drive['pill'].lower()}",
+             f"Time Machine: {tm['pill'].lower()}",
+             f"git_autosync: {autosync['pill'].lower()}"]
+    if dirty_count is not None:
+        parts.append("every project committed" if not dirty_count
+                     else f"{dirty_count} project{'s' if dirty_count != 1 else ''} with uncommitted work")
+    return level, headline, " · ".join(parts)
+
+
+# ----------------------------------------------------------------------------
+# Overview widgets
+# ----------------------------------------------------------------------------
+def set_level(widget, level: str) -> None:
+    """Set the `level` QSS property and re-apply the style sheet."""
+    if widget.property("level") == level:
+        return
+    widget.setProperty("level", level)
+    widget.style().unpolish(widget)
+    widget.style().polish(widget)
+
+
+def pill(text="", level="idle"):
+    lbl = QLabel(text)
+    lbl.setObjectName("Pill")
+    lbl.setAlignment(Qt.AlignCenter)
+    # Qt draws square corners when the radius exceeds half the height.
+    lbl.setFixedHeight(20)
+    set_level(lbl, level)
+    return lbl
+
+
+class Gauge(QFrame):
+    """One storage gauge: name, % used, a fill bar, and a detail line."""
+
+    def __init__(self, name):
+        super().__init__()
+        self.setObjectName("Card")
+        self.setGraphicsEffect(shadow())
+        v = QVBoxLayout(self)
+        v.setContentsMargins(14, 12, 14, 12)
+        v.setSpacing(6)
+        title = QLabel(name)
+        title.setObjectName("SectionTitle")
+        v.addWidget(title)
+        self.value_lbl = QLabel("—")
+        self.value_lbl.setObjectName("GaugeValue")
+        v.addWidget(self.value_lbl)
+        self.bar = QProgressBar()
+        self.bar.setObjectName("GaugeBar")
+        self.bar.setRange(0, 100)
+        self.bar.setTextVisible(False)
+        v.addWidget(self.bar)
+        self.detail_lbl = QLabel("Checking…")
+        self.detail_lbl.setObjectName("Muted")
+        self.detail_lbl.setWordWrap(True)
+        v.addWidget(self.detail_lbl)
+        v.addStretch()
+
+    def set_value(self, pct, detail):
+        self.value_lbl.setText("—" if pct is None else f"{pct} %")
+        self.bar.setValue(pct or 0)
+        set_level(self.bar, usage_level(pct))
+        self.detail_lbl.setText(detail or "")
+
+
+class JobRow(QFrame):
+    def __init__(self, name):
+        super().__init__()
+        self.setObjectName("ListRow")
+        h = QHBoxLayout(self)
+        h.setContentsMargins(0, 10, 0, 10)
+        text = QVBoxLayout()
+        text.setSpacing(2)
+        title = QLabel(name)
+        title.setObjectName("SectionTitle")
+        text.addWidget(title)
+        self.detail_lbl = QLabel("Checking…")
+        self.detail_lbl.setObjectName("Muted")
+        self.detail_lbl.setWordWrap(True)
+        text.addWidget(self.detail_lbl)
+        h.addLayout(text, 1)
+        self.pill = pill("Checking")
+        h.addWidget(self.pill, 0, Qt.AlignVCenter)
+
+    def show_job(self, job):
+        self.detail_lbl.setText(job["detail"])
+        self.pill.setText(job["pill"])
+        set_level(self.pill, job["level"])
+
+
+class OverviewPage(QWidget):
+    """Status banner, storage gauges, backup jobs and what needs attention.
+
+    Reads the other pages' cards rather than measuring anything twice: the
+    storage tiles, the Time Machine card's state, the Lab Health scan.
+    """
+    navigate = Signal(str)  # page key
+
+    def __init__(self, window):
+        super().__init__()
+        self._w = window
+        self._lab_rows = None
+        self._autosync = None
+        v = QVBoxLayout(self)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(16)
+
+        # Status banner
+        self.banner = QFrame()
+        self.banner.setObjectName("Banner")
+        b = QHBoxLayout(self.banner)
+        b.setContentsMargins(18, 16, 18, 16)
+        b.setSpacing(14)
+        self.banner_icon = QLabel("…")
+        self.banner_icon.setObjectName("BannerIcon")
+        self.banner_icon.setFixedWidth(28)
+        self.banner_icon.setAlignment(Qt.AlignCenter)
+        b.addWidget(self.banner_icon)
+        text = QVBoxLayout()
+        text.setSpacing(3)
+        self.banner_title = QLabel("Checking your backups…")
+        self.banner_title.setObjectName("BannerTitle")
+        self.banner_text = QLabel("")
+        self.banner_text.setObjectName("BannerText")
+        self.banner_text.setWordWrap(True)
+        text.addWidget(self.banner_title)
+        text.addWidget(self.banner_text)
+        b.addLayout(text, 1)
+        self.backup_btn = QPushButton("Back up now")
+        self.backup_btn.setObjectName("GreenButton")
+        self.backup_btn.setToolTip("Run the Google Drive backup now")
+        self.backup_btn.clicked.connect(self._back_up_now)
+        b.addWidget(self.backup_btn, 0, Qt.AlignVCenter)
+        set_level(self.banner, "idle")
+        set_level(self.banner_icon, "idle")
+        v.addWidget(self.banner)
+
+        # Storage gauges
+        grid = QGridLayout()
+        grid.setSpacing(12)
+        self.gauges = {}
+        for col, (key, name) in enumerate((("disk", "Mac disk"), ("google", "Google Drive"),
+                                           ("dropbox", "Dropbox"), ("icloud", "iCloud"))):
+            g = Gauge(name)
+            self.gauges[key] = g
+            grid.addWidget(g, 0, col)
+            grid.setColumnStretch(col, 1)
+        v.addLayout(grid)
+
+        # Backup jobs | Needs attention
+        lists = QHBoxLayout()
+        lists.setSpacing(16)
+        jobs = Card("Backup jobs", "Schedule, last result and status")
+        self.jobs = {"drive": JobRow("Google Drive mirror"),
+                     "tm": JobRow("Time Machine"),
+                     "autosync": JobRow("git_autosync")}
+        for row in self.jobs.values():
+            jobs.body(row)
+        jobs.vbox.addStretch()
+        lists.addWidget(jobs, 1)
+
+        attention = Card("Needs attention", "One click to the fix")
+        self.attention_box = QVBoxLayout()
+        self.attention_box.setSpacing(0)
+        attention.body(self.attention_box)
+        attention.vbox.addStretch()
+        lists.addWidget(attention, 1)
+        v.addLayout(lists)
+        v.addStretch()
+
+    # -- inputs ---------------------------------------------------------------
+    def set_lab_rows(self, rows):
+        self._lab_rows = rows
+        self.refresh()
+
+    def refresh_autosync(self):
+        self._autosync = autosync_state()
+        self.refresh()
+
+    def refresh_gauges(self):
+        tiles = self._w.storage_card.tiles
+        found = {}
+        for t in tiles:
+            if isinstance(t, ICloudTile):
+                found.setdefault("icloud", t)
+            elif getattr(t, "provider", None) is None:
+                found.setdefault("disk", t)
+            else:
+                found.setdefault(t.provider, t)
+        for key, gauge in self.gauges.items():
+            t = found.get(key)
+            if t is None:
+                gauge.set_value(None, "Not set up on this Mac")
+                continue
+            try:
+                gauge.set_value(t.pct, t.detail_lbl.text())
+            except RuntimeError:  # tile deleted by a refresh mid-read
+                pass
+
+    # -- render ---------------------------------------------------------------
+    def refresh(self):
+        card = self._w.backup_card
+        st = _load_state()
+        time_str = f"{st.get('backup_hour', 3):02d}:{st.get('backup_minute', 30):02d}"
+        info, _ = last_backup_info()
+        running = card.proc is not None
+        drive = drive_job(info, last_backup_age_hours(), launchd_loaded(), time_str, running)
+        tm = tm_job(self._w.tm_card.state)
+        if self._autosync is None:
+            self._autosync = autosync_state()
+        auto = autosync_job(self._autosync)
+        for key, job in (("drive", drive), ("tm", tm), ("autosync", auto)):
+            self.jobs[key].show_job(job)
+
+        lab = lab_attention(self._lab_rows) if self._lab_rows is not None else None
+        level, headline, summary = protection_banner(
+            drive, tm, auto, len(lab["dirty"]) if lab else None)
+        set_level(self.banner, level)
+        set_level(self.banner_icon, level)
+        self.banner_icon.setText({"ok": "✓", "warn": "!", "bad": "✕"}.get(level, "…"))
+        self.banner_title.setText(headline)
+        self.banner_text.setText(summary)
+        self.backup_btn.setEnabled(not running)
+        self.backup_btn.setText("Backing up…" if running else "Back up now")
+
+        self._show_attention(drive, tm, lab)
+
+    def _show_attention(self, drive, tm, lab):
+        items = []
+        if drive["level"] in ("warn", "bad"):
+            items.append((f"Google Drive backup: {drive['pill'].lower()}",
+                          "History", lambda: self.navigate.emit("history")))
+        if self._autosync and self._autosync["status"] == "attention":
+            items.append(("git_autosync: a repo is blocked or a run failed",
+                          "Open git_autosync",
+                          lambda: run_cmd(["open", "-a", AUTOSYNC_APP])))
+        if tm["level"] in ("warn", "bad"):
+            items.append((f"Time Machine: {tm['pill'].lower()}", "Time Machine",
+                          lambda: self.navigate.emit("timemachine")))
+        if lab is None:
+            items.append(("Lab Health is still scanning…", None, None))
+        else:
+            n = len(lab["dirty"])
+            if n:
+                names = ", ".join(lab["dirty"][:3]) + (" …" if n > 3 else "")
+                items.append((f"{n} project{'s' if n != 1 else ''} with uncommitted changes "
+                              f"({names})", "Review",
+                              lambda: self.navigate.emit("labhealth")))
+            if lab["reclaim_kb"] >= 100 * 1024:
+                items.append((f"{human_size(lab['reclaim_kb'] * 1024)} of caches and idle "
+                              f"envs can be reclaimed", "Clean up",
+                              lambda: self.navigate.emit("labhealth")))
+        if not items:
+            items.append(("Nothing needs attention", None, None))
+
+        while self.attention_box.count():
+            w = self.attention_box.takeAt(0).widget()
+            if w is not None:
+                w.hide()
+                w.setParent(None)
+                w.deleteLater()
+        for text, action, slot in items:
+            row = QFrame()
+            row.setObjectName("ListRow")
+            h = QHBoxLayout(row)
+            h.setContentsMargins(0, 10, 0, 10)
+            lbl = QLabel(text)
+            lbl.setWordWrap(True)
+            h.addWidget(lbl, 1)
+            if action:
+                btn = secondary_button(action)
+                btn.clicked.connect(slot)
+                h.addWidget(btn, 0, Qt.AlignVCenter)
+            self.attention_box.addWidget(row)
+
+    def _back_up_now(self):
+        self._w.backup_card.run_backup()
+        self.refresh()
+
+
+# ----------------------------------------------------------------------------
+# Main window: sidebar + one page per section
+# ----------------------------------------------------------------------------
+class SettingsCard(Card):
+    """The Settings page's own card: the options that used to sit behind ⚙."""
+
+    def __init__(self, window):
+        super().__init__("App settings",
+                         "Close behaviour, nightly backup time, mirror mode and failure webhook")
+        self._w = window
+        self.summary_lbl = QLabel()
+        self.summary_lbl.setWordWrap(True)
+        self.body(self.summary_lbl)
+        row = QHBoxLayout()
+        edit = QPushButton("Edit settings…")
+        edit.clicked.connect(window._open_settings)
+        row.addWidget(edit)
+        row.addStretch()
+        self.body(row)
+        self.refresh()
+
+    def refresh(self):
+        st = _load_state()
+        lines = [
+            "Hide to menu bar on close: " + ("on" if st.get("hide_on_close") else "off"),
+            f"Nightly backup time: {st.get('backup_hour', 3):02d}:{st.get('backup_minute', 30):02d}",
+            "Mirror mode: " + ("on — deletions reach Google Drive" if st.get("mirror_mode") else "off"),
+            "Webhook on failure: " + ("set" if st.get("webhook_url") else "not set"),
+        ]
+        self.summary_lbl.setText("\n".join(lines))
+
+
+class HistoryCard(Card):
+    def __init__(self):
+        super().__init__("Backup history", "The last 15 Google Drive runs, newest first")
+        self.view = BackupHistoryView()
+        self.view._table.setMinimumHeight(360)
+        refresh = secondary_button("🔄 Refresh")
+        refresh.clicked.connect(self.view.reload)
+        self.view.button_row.addWidget(refresh)
+        self.body(self.view)
+
+
+# key, sidebar label, page title
+PAGES = (
+    ("overview", "Overview", "Overview"),
+    ("storage", "Storage", "Storage"),
+    ("folders", "Backed-up folders", "Backed-up folders"),
+    ("labhealth", "Lab Health", "Lab Health"),
+    ("timemachine", "Time Machine", "Time Machine"),
+    ("history", "History", "History"),
+    ("settings", "Settings", "Settings"),
+)
+SIDEBAR_WIDTH = 210
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -3992,43 +4679,12 @@ class MainWindow(QMainWindow):
         # About box: "is this the one I just built" is asked far more often
         # than it is answered.
         self.setWindowTitle(f"Backup Control Center {version.version_string()}")
-        self.resize(1120, 860)
-        self.setMinimumWidth(1020)
-
-        scroll = SmartScrollArea()
-        scroll.setObjectName("ScrollArea")
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.NoFrame)
-
-        content = QWidget()
-        content.setObjectName("ScrollContent")
-        outer = QVBoxLayout(content)
-        outer.setContentsMargins(20, 20, 20, 20)
-        outer.setSpacing(16)
-
-        header = QHBoxLayout()
-        title_box = QVBoxLayout()
-        title_box.setSpacing(2)
-        title = QLabel("Backup Control Center")
-        title.setObjectName("AppTitle")
-        subtitle = QLabel("Dashboard, Google Drive backup, and storage at a glance")
-        subtitle.setObjectName("AppSubtitle")
-        title_box.addWidget(title)
-        title_box.addWidget(subtitle)
-        header.addLayout(title_box)
-        header.addStretch()
-        refresh_btn = secondary_button("🔄 Refresh all")
-        refresh_btn.clicked.connect(self.refresh_all)
-        header.addWidget(refresh_btn)
-        self._theme_btn = secondary_button("☀" if _DARK else "🌙")
-        self._theme_btn.setFixedWidth(36)
-        self._theme_btn.clicked.connect(self._toggle_theme)
-        header.addWidget(self._theme_btn)
-        settings_btn = secondary_button("⚙")
-        settings_btn.setFixedWidth(36)
-        settings_btn.clicked.connect(self._open_settings)
-        header.addWidget(settings_btn)
-        outer.addLayout(header)
+        # The pages kept the old single-column minimum (1020) and gained the
+        # sidebar beside it; never ask for more than the screen has.
+        screen = QApplication.primaryScreen()
+        avail = screen.availableGeometry() if screen else QRect(0, 0, 1440, 900)
+        self.setMinimumWidth(min(1020 + SIDEBAR_WIDTH, avail.width()))
+        self.resize(min(1340, avail.width()), min(860, avail.height()))
 
         self.storage_card = StorageCard()
         self.backup_card = BackupStatusCard()
@@ -4036,30 +4692,117 @@ class MainWindow(QMainWindow):
         self.health_card = LabHealthCard()
         self.tm_card = TimeMachineCard()
         self.tools_card = ToolsCard()
+        self.history_card = HistoryCard()
+        self.settings_card = SettingsCard(self)
+        self.overview = OverviewPage(self)
 
-        outer.addWidget(self.storage_card)
-        outer.addWidget(self.backup_card)
-        outer.addWidget(self.folders_card)
-        outer.addWidget(self.health_card)
-        outer.addWidget(self.tm_card)
-        outer.addWidget(self.tools_card)
-        outer.addStretch()
+        # Sidebar
+        sidebar = QFrame()
+        sidebar.setObjectName("Sidebar")
+        sidebar.setFixedWidth(SIDEBAR_WIDTH)
+        side = QVBoxLayout(sidebar)
+        side.setContentsMargins(12, 18, 12, 14)
+        side.setSpacing(2)
+        title = QLabel("Backup Control Center")
+        title.setObjectName("SidebarTitle")
+        title.setWordWrap(True)
+        side.addWidget(title)
+        ver = QLabel(version.version_string())
+        ver.setObjectName("SidebarVersion")
+        side.addWidget(ver)
+        side.addSpacing(14)
 
-        scroll.setWidget(content)
-        self.setCentralWidget(scroll)
+        self.stack = QStackedWidget()
+        self.stack.setObjectName("PageStack")
+        self.nav = {}
+        self._titles = {}
+        self._page_index = {}
+        group = QButtonGroup(self)
+        group.setExclusive(True)
+        contents = {
+            "overview": [self.overview],
+            "storage": [self.storage_card],
+            "folders": [self.backup_card, self.folders_card],
+            "labhealth": [self.health_card],
+            "timemachine": [self.tm_card],
+            "history": [self.history_card],
+            "settings": [self.settings_card, self.tools_card],
+        }
+        for key, label, page_title in PAGES:
+            btn = QPushButton(label)
+            btn.setObjectName("NavButton")
+            btn.setCheckable(True)
+            btn.clicked.connect(lambda _=False, k=key: self.show_page(k))
+            group.addButton(btn)
+            self.nav[key] = btn
+            if key == "settings":
+                side.addStretch()
+            side.addWidget(btn)
+            self._titles[key] = page_title
+            self._page_index[key] = self.stack.addWidget(self._make_page(contents[key]))
+
+        # Top bar: page title, Refresh all, theme toggle
+        topbar = QFrame()
+        topbar.setObjectName("TopBar")
+        top = QHBoxLayout(topbar)
+        top.setContentsMargins(24, 14, 20, 12)
+        self.page_title = QLabel()
+        self.page_title.setObjectName("PageTitle")
+        top.addWidget(self.page_title)
+        top.addStretch()
+        refresh_btn = secondary_button("🔄 Refresh all")
+        refresh_btn.clicked.connect(self.refresh_all)
+        top.addWidget(refresh_btn)
+        self._theme_btn = secondary_button("☀" if _DARK else "🌙")
+        self._theme_btn.setFixedWidth(36)
+        self._theme_btn.setToolTip("Switch light / dark for this session")
+        self._theme_btn.clicked.connect(self._toggle_theme)
+        top.addWidget(self._theme_btn)
+
+        right = QWidget()
+        rv = QVBoxLayout(right)
+        rv.setContentsMargins(0, 0, 0, 0)
+        rv.setSpacing(0)
+        rv.addWidget(topbar)
+        rv.addWidget(self.stack, 1)
+
+        central = QWidget()
+        central.setObjectName("ScrollContent")
+        h = QHBoxLayout(central)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(0)
+        h.addWidget(sidebar)
+        h.addWidget(right, 1)
+        self.setCentralWidget(central)
 
         # Single-folder quick backup from Folders card right-click.
         self.folders_card.single_backup_requested.connect(self.backup_card.run_single_folder)
 
-        # Tray icon — patch backup_card._finished to keep tray in sync.
+        # Overview inputs.
+        self.overview.navigate.connect(self.show_page)
+        self.storage_card.updated.connect(self.overview.refresh_gauges)
+        self.tm_card.updated.connect(self.overview.refresh)
+        self.health_card.scanned.connect(self.overview.set_lab_rows)
+        self.overview.refresh_gauges()
+        self.overview.refresh()
+        self._overview_timer = QTimer(self)
+        self._overview_timer.setInterval(60 * 1000)
+        self._overview_timer.timeout.connect(self.overview.refresh_autosync)
+        self._overview_timer.start()
+
+        # Tray icon — patch backup_card._finished to keep tray and Overview in sync.
         self.tray = BackupTrayIcon(self)
         original_finished = self.backup_card._finished
 
         def _patched_finished():
             original_finished()
             self.tray.update_status()
+            self.overview.refresh()
+            self.history_card.view.reload()
 
         self.backup_card._finished = _patched_finished
+
+        self.show_page("overview")
 
         # Watch for a second launch asking us to un-hide. The directory is
         # watched rather than the file, because a watch on a file that gets
@@ -4074,6 +4817,37 @@ class MainWindow(QMainWindow):
 
         # Live dark mode: re-theme when system appearance changes.
         QApplication.instance().paletteChanged.connect(self._on_palette_changed)
+
+    @staticmethod
+    def _make_page(widgets):
+        """One sidebar page: its cards in a scroll area of its own."""
+        scroll = SmartScrollArea()
+        scroll.setObjectName("ScrollArea")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        content = QWidget()
+        content.setObjectName("ScrollContent")
+        v = QVBoxLayout(content)
+        v.setContentsMargins(24, 18, 24, 24)
+        v.setSpacing(16)
+        for w in widgets:
+            v.addWidget(w)
+        v.addStretch()
+        scroll.setWidget(content)
+        return scroll
+
+    def show_page(self, key):
+        self.stack.setCurrentIndex(self._page_index[key])
+        self.nav[key].setChecked(True)
+        self.page_title.setText(self._titles[key])
+        if key == "overview":
+            self.overview.refresh()
+        elif key == "settings":
+            self.settings_card.refresh()
+
+    def current_page(self) -> str:
+        idx = self.stack.currentIndex()
+        return next(k for k, i in self._page_index.items() if i == idx)
 
     def _on_show_requested(self, _path):
         """A second launch asked us to come back. Fires on any write in the
@@ -4093,22 +4867,25 @@ class MainWindow(QMainWindow):
         if dlg.exec():
             self.backup_card.refresh_schedule()
             self.backup_card.refresh_wake()
+            self.settings_card.refresh()
+            self.overview.refresh()
+
+    def _apply_theme(self):
+        QApplication.instance().setStyleSheet(build_app_style(_DARK))
+        self._theme_btn.setText("☀" if _DARK else "🌙")
+        self.storage_card.refresh()
 
     def _toggle_theme(self):
         global _DARK
         _DARK = not _DARK
-        QApplication.instance().setStyleSheet(build_app_style(_DARK))
-        self._theme_btn.setText("☀" if _DARK else "🌙")
-        self.storage_card.refresh()
+        self._apply_theme()
 
     def _on_palette_changed(self, _palette=None):
         new_dark = _system_dark_mode()
         global _DARK
         if new_dark != _DARK:
             _DARK = new_dark
-            QApplication.instance().setStyleSheet(build_app_style(_DARK))
-            self._theme_btn.setText("☀" if _DARK else "🌙")
-            self.storage_card.refresh()
+            self._apply_theme()
 
     def closeEvent(self, event):
         self.backup_card.save_log_scroll()
@@ -4144,6 +4921,9 @@ class MainWindow(QMainWindow):
         self.folders_card.reload_folders()
         self.health_card.rescan()
         self.tm_card.refresh()
+        self.history_card.view.reload()
+        self.settings_card.refresh()
+        self.overview.refresh_autosync()
         self.tray.update_status()
 
 
