@@ -22,7 +22,9 @@ row, so they never scroll inside the page. Each page scrolls on its own.
 
 ### Overview
 The page the window opens on. It measures nothing itself: it reads the other pages'
-cards and git_autosync's state files.
+cards and git_autosync's state files. The slow reads (`launchctl list` and the backup
+logs) run in a background thread, are reused for 45 s, and are repeated once a minute
+only while the Overview is on screen; switching pages never waits on them.
 
 - **Status banner**: green **Your Mac is protected** when every backup job is fine,
   amber when one needs attention, red when one is broken or badly behind (no Drive
@@ -34,14 +36,17 @@ cards and git_autosync's state files.
   not set up on this Mac shows "—".
 - **Backup jobs**, each with its schedule or last result and a status pill:
   - **Google Drive mirror**: nightly time and the last good copy's age. Up to date within
-    25 h (the menu-bar icon's line), Overdue after that, Errors when the last run failed.
+    25 h (the menu-bar icon's line), Overdue after that, Errors when the last run failed,
+    Last run unfinished when the newest run never logged its finish. A dry run or
+    deletion preview does not count as backing up.
   - **Time Machine**: last backup's age. Up to date within 48 h; Not set up, Disk away
     or Behind otherwise.
   - **git_autosync**: read from `~/Library/Application Support/git_autosync/`:
     `last_status.txt` (`ok` / `attention`), `last_success.txt` for the last clean run,
     and its loaded LaunchAgents (`…git-autosync`, `…-hourly`) for the schedule. Needs
     attention when git_autosync says so (a repo blocked by gitleaks, an error, or an
-    unlisted repo). Re-read every minute.
+    unlisted repo). Shown as unknown, and left out of the banner, when git_autosync has
+    written no state files.
 - **Needs attention**: one row per problem with one button: a blocked or failed
   git_autosync run (**Open git_autosync**), a late or failed Drive backup (**History**),
   Time Machine not set up or behind, projects with uncommitted changes (**Review**, to Lab

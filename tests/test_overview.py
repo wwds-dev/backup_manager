@@ -162,3 +162,86 @@ def test_every_page_has_a_sidebar_entry_and_settings_is_last():
     keys = [k for k, *_ in main.PAGES]
     assert keys[0] == "overview" and keys[-1] == "settings"
     assert {"storage", "folders", "labhealth", "timemachine", "history"} <= set(keys)
+
+
+# -- review fixes (docs/audit/sidebar-redesign-review.md) -------------------------
+def test_idle_never_outranks_a_known_level():
+    assert main.worst_level("ok", "idle") == "ok"
+    assert main.worst_level("warn", "idle") == "warn"
+    assert main.worst_level("idle", "idle") == "idle"
+
+
+def test_banner_is_green_without_git_autosync_installed():
+    level, headline, _ = main.protection_banner(job("ok"), job("ok"), job("idle", "Unknown"), 0)
+    assert (level, headline) == ("ok", "Your Mac is protected")
+
+
+def test_an_unfinished_newest_run_is_not_up_to_date():
+    unfinished = "Last run: 2026-11-10 10:10:12  —  —"
+    out = main.drive_job(unfinished, 5, True, "03:30")
+    assert (out["pill"], out["level"]) == ("Last run unfinished", "warn")
+    assert main.drive_job(unfinished, 100, True, "03:30")["level"] == "bad"
+    assert main.drive_job(unfinished, 5, True, "03:30", running=True)["level"] == "info"
+
+
+class _Card:
+    def __init__(self, proc=None, dry=False):
+        self.proc, self._dry_run = proc, dry
+
+    def run_backup(self):
+        pass
+
+
+def _window(proc=None, dry=False):
+    from types import SimpleNamespace
+    return SimpleNamespace(
+        backup_card=_Card(proc, dry),
+        tm_card=SimpleNamespace(state={"configured": None}),
+        storage_card=SimpleNamespace(tiles=[]),
+    )
+
+
+@pytest.fixture
+def no_subprocess(monkeypatch):
+    def boom(*_a, **_k):
+        raise AssertionError("refresh() must not run a subprocess on the GUI thread")
+    monkeypatch.setattr(main, "run_cmd", boom)
+    monkeypatch.setattr(main, "last_backup_info", boom)
+    monkeypatch.setattr(main, "last_backup_age_hours", boom)
+    monkeypatch.setattr(main, "_load_state", lambda: {})
+
+
+def probe(status="ok"):
+    return {"info": "Last run: 2026-11-10 10:10:12  —  OK", "age": 3, "loaded": True,
+            "autosync": {"status": status, "last_success": datetime.now() - timedelta(hours=1),
+                         "last_sync": None, "last_backup": None,
+                         "scheduled": True, "hourly": True}}
+
+
+def test_overview_refresh_renders_from_the_probe_without_subprocesses(qapp, no_subprocess):
+    page = main.OverviewPage(_window())
+    page.refresh()                                   # before any probe: checking, no calls
+    assert page.jobs["drive"].pill.text() == "Checking"
+    page._on_probe(probe("attention"))
+    assert page.jobs["drive"].pill.text() == "Up to date"
+    assert page.jobs["autosync"].pill.text() == "Needs attention"
+    assert page.banner.property("level") == "warn"
+
+
+def test_a_fresh_probe_is_reused(qapp, no_subprocess, monkeypatch):
+    started = []
+    monkeypatch.setattr(main, "replace_worker", lambda old, new: started.append(new) or new)
+    page = main.OverviewPage(_window())
+    page._on_probe(probe())
+    page.request_probe()
+    assert started == []
+    page.request_probe(force=True)
+    assert len(started) == 1
+
+
+@pytest.mark.parametrize("dry, pill", [(False, "Running"), (True, "Up to date")])
+def test_dry_runs_and_previews_are_not_backing_up(qapp, no_subprocess, dry, pill):
+    page = main.OverviewPage(_window(proc=object(), dry=dry))
+    page._on_probe(probe())
+    assert page.jobs["drive"].pill.text() == pill
+    assert page.backup_btn.isEnabled() == dry

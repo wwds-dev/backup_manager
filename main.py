@@ -2362,6 +2362,8 @@ class BackupHistoryDialog(QDialog):
 # Backup status & schedule card
 # ----------------------------------------------------------------------------
 class BackupStatusCard(Card):
+    runs_changed = Signal()  # a run started; the Overview shows it (finish is patched in)
+
     def __init__(self):
         super().__init__("Google Drive Backup", "Status, schedule, and manual run")
         self.proc = None
@@ -2583,6 +2585,7 @@ class BackupStatusCard(Card):
             "--stats", "--itemize-changes",
             src, dest,
         ])
+        self.runs_changed.emit()
 
     def refresh_status(self):
         info, _ = last_backup_info()
@@ -2676,6 +2679,7 @@ class BackupStatusCard(Card):
         self.pause_btn.setEnabled(True)
         self.stop_btn.setEnabled(True)
         self.proc.start("/bin/bash", [str(SCRIPT)])
+        self.runs_changed.emit()
 
     def run_dry_run(self):
         if self.proc is not None:
@@ -2697,6 +2701,7 @@ class BackupStatusCard(Card):
         self.pause_btn.setEnabled(True)
         self.stop_btn.setEnabled(True)
         self.proc.start("/bin/bash", [str(SCRIPT)])
+        self.runs_changed.emit()
 
     def run_delete_preview(self):
         """List what mirror mode would delete from Drive. Changes nothing.
@@ -2730,6 +2735,7 @@ class BackupStatusCard(Card):
         self.pause_btn.setEnabled(True)
         self.stop_btn.setEnabled(True)
         self.proc.start("/bin/bash", [str(SCRIPT)])
+        self.runs_changed.emit()
 
     def _delete_preview_finished(self):
         # rsync --itemize-changes marks removals "*deleting   <path>", with the
@@ -4198,7 +4204,13 @@ def usage_level(pct) -> str:
 
 
 def worst_level(*levels) -> str:
-    return max(levels, key=lambda lv: _LEVEL_RANK.get(lv, 0)) if levels else "ok"
+    """The most serious level. "idle" (not known yet, or not installed) only
+    wins when nothing else is known, so a missing git_autosync can never keep
+    the banner on "Checking…"."""
+    known = [lv for lv in levels if lv != "idle"]
+    if not known:
+        return "idle" if levels else "ok"
+    return max(known, key=lambda lv: _LEVEL_RANK.get(lv, 0))
 
 
 def _read_stamp(path: Path):
@@ -4262,6 +4274,12 @@ def drive_job(info: str, age_h, scheduled: bool, time_str: str, running: bool = 
     detail = f"{when} · last good copy {describe_age(age_h)}"
     if status == "ERRORS":
         return {"detail": detail, "pill": "Errors", "level": "bad"}
+    if status != "OK":
+        # The newest run started and never wrote its finish line: still going
+        # outside this app, or killed. An older good copy must not read green.
+        level = "bad" if age_h is None or age_h > DRIVE_BAD_HOURS else "warn"
+        return {"detail": f"{detail} · newest run did not finish", "pill": "Last run unfinished",
+                "level": level}
     if age_h is None or age_h > DRIVE_BAD_HOURS:
         return {"detail": detail, "pill": "Overdue", "level": "bad"}
     if age_h > DRIVE_OK_HOURS or not scheduled:
@@ -4426,6 +4444,26 @@ class JobRow(QFrame):
         set_level(self.pill, job["level"])
 
 
+class OverviewProbe(QThread):
+    """The Overview's slow inputs, off the GUI thread: one `launchctl list`
+    (for both the Drive schedule and git_autosync's agents) and the backup
+    logs."""
+    done = Signal(dict)
+
+    def run(self):
+        _, out, _ = run_cmd(["launchctl", "list"], timeout=15)
+        info, _ = last_backup_info()
+        self.done.emit({
+            "info": info,
+            "age": last_backup_age_hours(),
+            "loaded": LAUNCHD_LABEL in out,
+            "autosync": autosync_state(launchctl_out=out),
+        })
+
+
+PROBE_MAX_AGE_S = 45   # a probe this fresh is reused rather than re-run
+
+
 class OverviewPage(QWidget):
     """Status banner, storage gauges, backup jobs and what needs attention.
 
@@ -4438,7 +4476,9 @@ class OverviewPage(QWidget):
         super().__init__()
         self._w = window
         self._lab_rows = None
-        self._autosync = None
+        self._probe = None       # last OverviewProbe result
+        self._probe_at = None    # when it arrived
+        self._probe_worker = None
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(16)
@@ -4511,8 +4551,19 @@ class OverviewPage(QWidget):
         self._lab_rows = rows
         self.refresh()
 
-    def refresh_autosync(self):
-        self._autosync = autosync_state()
+    def request_probe(self, force=False):
+        """Re-read schedule, logs and git_autosync in the background, unless
+        the last read is under PROBE_MAX_AGE_S old (force skips that)."""
+        if (not force and self._probe_at is not None
+                and (datetime.now() - self._probe_at).total_seconds() < PROBE_MAX_AGE_S):
+            return
+        worker = OverviewProbe()
+        worker.done.connect(self._on_probe)
+        self._probe_worker = replace_worker(self._probe_worker, worker)
+
+    def _on_probe(self, data):
+        self._probe = data
+        self._probe_at = datetime.now()
         self.refresh()
 
     def refresh_gauges(self):
@@ -4536,17 +4587,26 @@ class OverviewPage(QWidget):
                 pass
 
     # -- render ---------------------------------------------------------------
+    @property
+    def _autosync(self):
+        return self._probe["autosync"] if self._probe else None
+
     def refresh(self):
+        """Render from what is already known. Cheap: no subprocess, no logs."""
         card = self._w.backup_card
         st = _load_state()
         time_str = f"{st.get('backup_hour', 3):02d}:{st.get('backup_minute', 30):02d}"
-        info, _ = last_backup_info()
-        running = card.proc is not None
-        drive = drive_job(info, last_backup_age_hours(), launchd_loaded(), time_str, running)
+        # A dry run or deletion preview changes nothing, so it is not "backing up".
+        running = card.proc is not None and not card._dry_run
+        checking = {"detail": "Checking…", "pill": "Checking", "level": "idle"}
+        if self._probe is None:
+            drive = dict(checking, level="info", pill="Running") if running else checking
+            auto = checking
+        else:
+            p = self._probe
+            drive = drive_job(p["info"], p["age"], p["loaded"], time_str, running)
+            auto = autosync_job(p["autosync"])
         tm = tm_job(self._w.tm_card.state)
-        if self._autosync is None:
-            self._autosync = autosync_state()
-        auto = autosync_job(self._autosync)
         for key, job in (("drive", drive), ("tm", tm), ("autosync", auto)):
             self.jobs[key].show_job(job)
 
@@ -4783,11 +4843,16 @@ class MainWindow(QMainWindow):
         self.storage_card.updated.connect(self.overview.refresh_gauges)
         self.tm_card.updated.connect(self.overview.refresh)
         self.health_card.scanned.connect(self.overview.set_lab_rows)
+        self.backup_card.runs_changed.connect(self.overview.refresh)
         self.overview.refresh_gauges()
         self.overview.refresh()
+        self.overview.request_probe(force=True)
+        # Re-read git_autosync and the schedule once a minute, but only while
+        # someone can see the Overview: the reads run off the GUI thread
+        # anyway, and a hidden page has no one to show them to.
         self._overview_timer = QTimer(self)
         self._overview_timer.setInterval(60 * 1000)
-        self._overview_timer.timeout.connect(self.overview.refresh_autosync)
+        self._overview_timer.timeout.connect(self._overview_tick)
         self._overview_timer.start()
 
         # Tray icon — patch backup_card._finished to keep tray and Overview in sync.
@@ -4798,6 +4863,7 @@ class MainWindow(QMainWindow):
             original_finished()
             self.tray.update_status()
             self.overview.refresh()
+            self.overview.request_probe(force=True)
             self.history_card.view.reload()
 
         self.backup_card._finished = _patched_finished
@@ -4841,9 +4907,14 @@ class MainWindow(QMainWindow):
         self.nav[key].setChecked(True)
         self.page_title.setText(self._titles[key])
         if key == "overview":
-            self.overview.refresh()
+            self.overview.refresh()          # cheap: from what is already known
+            self.overview.request_probe()    # background, and only if stale
         elif key == "settings":
             self.settings_card.refresh()
+
+    def _overview_tick(self):
+        if self.isVisible() and self.current_page() == "overview":
+            self.overview.request_probe(force=True)
 
     def current_page(self) -> str:
         idx = self.stack.currentIndex()
@@ -4868,7 +4939,7 @@ class MainWindow(QMainWindow):
             self.backup_card.refresh_schedule()
             self.backup_card.refresh_wake()
             self.settings_card.refresh()
-            self.overview.refresh()
+            self.overview.request_probe(force=True)
 
     def _apply_theme(self):
         QApplication.instance().setStyleSheet(build_app_style(_DARK))
@@ -4923,7 +4994,7 @@ class MainWindow(QMainWindow):
         self.tm_card.refresh()
         self.history_card.view.reload()
         self.settings_card.refresh()
-        self.overview.refresh_autosync()
+        self.overview.request_probe(force=True)
         self.tray.update_status()
 
 
