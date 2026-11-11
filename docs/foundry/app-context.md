@@ -9,8 +9,8 @@ true. Agents treat the **Invariants** as hard rules.
 ## Distribution
 tier: public
 
-Status: proposed by agent, not yet confirmed by the owner (2026-11-11). To confirm, delete this
-line; to change the tier, edit `tier:` first. Release stays stopped while this line is here.
+Status: tier confirmed by the owner on 2026-11-11 ("confirm all nine tiers"). An agent proposed it
+the same day from the evidence below; raising it later goes through Comply first.
 
 Evidence: the repo `wwds-dev/backup_manager` is public (checked 2026-11-11); it has no
 `LICENSE`, no GitHub release, no download page and no store listing. Nobody pays and it takes no
