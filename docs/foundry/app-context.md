@@ -1,6 +1,6 @@
 # App context
 
-The only app-specific file the company agents read. Fill it in once; keep it short and
+The only app-specific file the Foundry agents read. Fill it in once; keep it short and
 true. Agents treat the **Invariants** as hard rules.
 
 ## Product
