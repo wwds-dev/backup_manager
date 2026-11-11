@@ -47,3 +47,25 @@ with `launchd_loaded` / `run_cmd` patched.
   `BackupStatusCard.runs_changed` re-renders on every start. Tests added; each fix
   mutation-checked.
 - P3 and the wider test gaps (MainWindow construction, signal wiring) remain open.
+
+## P3 resolution (2026-11-11)
+All six P3 items fixed in `main.py`; each has a test in `tests/test_main_window.py`.
+- `describe_age`: 36–47 h now reads "1 day ago" (singular).
+- `tm_job`: a `latestbackup` name that is not a date shows pill "Date unknown", level warn
+  (a backup exists, its age cannot be checked, so neither "No backup" nor green).
+- `refresh_gauges`: with several accounts of one provider the gauge shows the fullest one and
+  names it ("… · account (fullest of N)"); the iCloud gauge keeps its last finished value while
+  a new `du` runs.
+- `_show_attention` rebuilds only when its (text, action) list changed; "Open git_autosync"
+  uses `QProcess.startDetached`, no `run_cmd`.
+- One shared `_WheelRouter` app filter replaces one filter per `SmartScrollArea`; it asks only
+  visible areas and drops dead ones. `tests/test_scroll_latching.py` unchanged and green.
+- `#Muted` / `#SidebarVersion` use a `muted` token: #636366 light (≥5:1), #98989D dark
+  (≥4.5:1 on every dark surface; the old #8E8E93 was 4.3:1 on dark cards).
+
+Test gap closed: an offscreen `MainWindow` test (all backup triggers, `run_cmd`,
+`launchd_loaded`, iCloud `du`, the probe and cloud accounts patched) opens every page, toggles
+the theme, and drives `storage_card.updated`, `tm_card.updated`, `health_card.scanned` and
+`backup_card.runs_changed` into the Overview. Its teardown drains `_thread_keeper`, otherwise
+the interpreter aborts at exit. Still open: `BackupHistoryView`, `fit_height_to_rows`, idle
+banner input.

@@ -239,6 +239,7 @@ def build_app_style(dark: bool) -> str:
         menu_bg  = "#2C2C2E"
         menu_bdr = "#38383A"
         side_bg  = "#232325"
+        muted    = "#98989D"   # 4.5:1+ on every dark surface (#8E8E93 was 4.3 on cards)
     else:
         page     = "#F2F2F7"   # systemBackground (light)
         card     = "#FFFFFF"   # secondarySystemBackground (light)
@@ -269,6 +270,7 @@ def build_app_style(dark: bool) -> str:
         menu_bg  = "#FFFFFF"
         menu_bdr = "#C6C6C8"
         side_bg  = "#EBEBF0"
+        muted    = "#636366"   # was #8E8E93 (~3:1 on light); 5.1:1 on the page
     lv = LEVEL_COLORS[dark]
     green, green_h, green_tint = lv["accent"], lv["accent_hover"], lv["accent_tint"]
 
@@ -619,7 +621,7 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
     letter-spacing: -0.2px;
 }}
 #SidebarVersion {{
-    color: #8E8E93;
+    color: {muted};
     font-size: 11px;
 }}
 QPushButton#NavButton {{
@@ -651,7 +653,7 @@ QPushButton#NavButton:checked {{
     background: {page};
 }}
 #Muted {{
-    color: #8E8E93;
+    color: {muted};
     font-size: 11px;
 }}
 #SectionTitle {{
@@ -4105,6 +4107,43 @@ class ResizableColumns(QObject):
         return False
 
 
+class _WheelRouter(QObject):
+    """The one app-wide wheel filter, shared by every SmartScrollArea.
+
+    Each area used to install its own filter on the application (7 of them,
+    never removed), so every event walked all of them. Now there is one; it
+    asks only the areas that are visible, and forgets an area when it dies.
+    """
+    _instance = None
+
+    def __init__(self):
+        super().__init__(QApplication.instance())
+        self._areas = []
+        QApplication.instance().installEventFilter(self)
+
+    @classmethod
+    def register(cls, area):
+        if cls._instance is None or cls._instance.parent() is not QApplication.instance():
+            cls._instance = cls()
+        cls._instance._areas.append(area)
+        area.destroyed.connect(lambda _=None, a=area: cls._instance._forget(a))
+
+    def _forget(self, area):
+        if area in self._areas:
+            self._areas.remove(area)
+
+    def eventFilter(self, obj, event):
+        if event.type() != QEvent.Wheel:
+            return False
+        for area in list(self._areas):
+            try:
+                if area.isVisible() and area.eventFilter(obj, event):
+                    return True
+            except RuntimeError:  # area deleted, destroyed signal not yet seen
+                self._forget(area)
+        return False
+
+
 class SmartScrollArea(QScrollArea):
     """Routes each scroll gesture to one place for its whole length.
 
@@ -4125,7 +4164,7 @@ class SmartScrollArea(QScrollArea):
         self._latched = None    # scrollbar that owns the current gesture
         self._origin = None     # widget the current gesture started over
         self._last_ms = None
-        QApplication.instance().installEventFilter(self)
+        _WheelRouter.register(self)
 
     def eventFilter(self, obj, event):
         if (event.type() == QEvent.Wheel and isinstance(obj, QWidget)
@@ -4260,7 +4299,8 @@ def describe_age(hours) -> str:
         return "just now"
     if hours < 36:
         return f"{int(hours)} h ago"
-    return f"{int(hours // 24)} days ago"
+    days = int(hours // 24)  # 36-47 h is 1 day: singular
+    return f"{days} day ago" if days == 1 else f"{days} days ago"
 
 
 def drive_job(info: str, age_h, scheduled: bool, time_str: str, running: bool = False) -> dict:
@@ -4307,7 +4347,16 @@ def tm_job(state: dict) -> dict:
     age = tm_latest_age(latest)
     if age is None:
         level = "warn"
-        pill = "Disk away" if "not connected" in latest else "No backup"
+        if "not connected" in latest:
+            pill = "Disk away"
+        elif latest == "none found":
+            pill = "No backup"
+        else:
+            # tmutil named a backup, but not in a date format we can parse
+            # (describe_tm_latest falls back to the folder name). A backup
+            # exists, so never say "No backup"; its age is unknown, so not
+            # green either.
+            pill = "Date unknown"
         detail = f"Last backup: {latest}"
     else:
         detail = f"Last backup {describe_age(age)} ({latest})"
@@ -4479,6 +4528,8 @@ class OverviewPage(QWidget):
         self._probe = None       # last OverviewProbe result
         self._probe_at = None    # when it arrived
         self._probe_worker = None
+        self._icloud_last = None     # (pct, detail) of the last finished du
+        self._attention_key = None   # what the attention list currently shows
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(16)
@@ -4567,24 +4618,38 @@ class OverviewPage(QWidget):
         self.refresh()
 
     def refresh_gauges(self):
-        tiles = self._w.storage_card.tiles
-        found = {}
-        for t in tiles:
+        groups = {}
+        for t in self._w.storage_card.tiles:
             if isinstance(t, ICloudTile):
-                found.setdefault("icloud", t)
-            elif getattr(t, "provider", None) is None:
-                found.setdefault("disk", t)
+                key = "icloud"
             else:
-                found.setdefault(t.provider, t)
+                key = getattr(t, "provider", None) or "disk"
+            groups.setdefault(key, []).append(t)
         for key, gauge in self.gauges.items():
-            t = found.get(key)
-            if t is None:
+            tiles = groups.get(key)
+            if not tiles:
                 gauge.set_value(None, "Not set up on this Mac")
                 continue
             try:
-                gauge.set_value(t.pct, t.detail_lbl.text())
+                # Several accounts of one provider: show the fullest one, so a
+                # nearly full second account cannot hide behind a roomy first.
+                known = [t for t in tiles if t.pct is not None]
+                t = max(known, key=lambda x: x.pct) if known else tiles[0]
+                pct, detail = t.pct, t.detail_lbl.text()
+                if len(tiles) > 1 and known:
+                    acct = (getattr(t, "account_lbl", None) and t.account_lbl.text()) \
+                        or getattr(t, "account_key", "")
+                    detail = f"{detail} · {acct} (fullest of {len(tiles)})"
             except RuntimeError:  # tile deleted by a refresh mid-read
-                pass
+                continue
+            if key == "icloud":
+                # StorageCard.refresh() makes a fresh tile whose du has not
+                # finished: keep the last known value until the new one arrives.
+                if pct is None and self._icloud_last is not None:
+                    pct, detail = self._icloud_last
+                elif pct is not None:
+                    self._icloud_last = (pct, detail)
+            gauge.set_value(pct, detail)
 
     # -- render ---------------------------------------------------------------
     @property
@@ -4631,7 +4696,7 @@ class OverviewPage(QWidget):
         if self._autosync and self._autosync["status"] == "attention":
             items.append(("git_autosync: a repo is blocked or a run failed",
                           "Open git_autosync",
-                          lambda: run_cmd(["open", "-a", AUTOSYNC_APP])))
+                          self._open_autosync))
         if tm["level"] in ("warn", "bad"):
             items.append((f"Time Machine: {tm['pill'].lower()}", "Time Machine",
                           lambda: self.navigate.emit("timemachine")))
@@ -4651,6 +4716,11 @@ class OverviewPage(QWidget):
         if not items:
             items.append(("Nothing needs attention", None, None))
 
+        # Rebuilding on every refresh would delete a button under the click.
+        key = tuple((text, action) for text, action, _slot in items)
+        if key == self._attention_key:
+            return
+        self._attention_key = key
         while self.attention_box.count():
             w = self.attention_box.takeAt(0).widget()
             if w is not None:
@@ -4670,6 +4740,10 @@ class OverviewPage(QWidget):
                 btn.clicked.connect(slot)
                 h.addWidget(btn, 0, Qt.AlignVCenter)
             self.attention_box.addWidget(row)
+
+    @staticmethod
+    def _open_autosync():
+        QProcess.startDetached("open", ["-a", AUTOSYNC_APP])  # never blocks the GUI
 
     def _back_up_now(self):
         self._w.backup_card.run_backup()
