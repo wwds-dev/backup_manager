@@ -614,8 +614,8 @@ See [SUGGESTIONS.md](SUGGESTIONS.md) and the backlog in [TODO.md](TODO.md).
 [AGENTS.md](AGENTS.md) sets the engineering process for agents working on this repo:
 define, architect, build, a separate read-only review, verify, document and release, with
 the owner as the only approver at each gate. App facts and invariants are in
-`docs/company/app-context.md`, specs in `docs/specs/`, review reports in `docs/audit/`,
-role playbooks in `docs/playbooks/`, and phase activity in `docs/company/activity.jsonl`.
+`docs/foundry/app-context.md`, specs in `docs/specs/`, review reports in `docs/audit/`,
+role playbooks in `docs/playbooks/`, and phase activity in `docs/foundry/activity.jsonl`.
 
 ## Version
 
