@@ -33,7 +33,13 @@ REGISTER = "register.md"
 # that is the agent's and the signer's judgement, so it is not enforced here.
 REQUIRED = {"public": ("register.md", "licences.md", "privacy.md", "name.md"),
             "commercial": ("register.md", "licences.md", "privacy.md", "name.md", "terms.md"),
-            "client": ("register.md", "licences.md", "privacy.md", "name.md", "terms.md")}
+            "client": ("register.md", "licences.md", "privacy.md", "name.md", "terms.md",
+                       "client/services-agreement.md", "client/sow.md", "client/dpa.md",
+                       "client/acceptance-warranty.md")}
+# Tier `client`: the contract templates are a lawyer trigger on first use. Until a lawyer has
+# signed this app's pack once, this counts as an open trigger even when the register lists none.
+CLIENT_FIRST_USE = ("first use of the client contract templates (docs/legal/client/): no lawyer "
+                    "sign-off recorded for this app yet")
 TRIGGER = re.compile(r"^\s*[-*] \[ \]\s*\**LAWYER\b\**:?\s*(.*)$", re.M)
 
 
@@ -125,6 +131,8 @@ def signoffs(app: Path) -> list[dict]:
 def evaluate(app: Path) -> dict:
     """Everything `status`, `check` and the dashboard need. `ok` is the gate's verdict."""
     t, h, trig, signs = tier(app), pack_hash(app), open_triggers(app), signoffs(app)
+    if t == "client" and not any(s["role"] == "lawyer" for s in signs):
+        trig = trig + [CLIENT_FIRST_USE]
     last = signs[-1] if signs else None
     current = [s for s in signs if s["hash"] == h] if h else []
     reasons: list[str] = []

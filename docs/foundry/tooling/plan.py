@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Write the app's plan: docs/foundry/plan.toml (read by the Foundry workspace's Roadmap and Time & money).
 
-    python3 docs/foundry/tooling/plan.py . set [--estimate-hours H] [--budget-usd N] [--rate-eur N]
-                                               [--due YYYY-MM-DD] [--horizon now|next|later]
+    python3 docs/foundry/tooling/plan.py . set [--estimate-hours H] [--budget-usd N] [--eval-budget-usd N]
+                                               [--rate-eur N] [--due YYYY-MM-DD] [--horizon now|next|later]
     python3 docs/foundry/tooling/plan.py . milestone "<name>" --due YYYY-MM-DD [--start D] [--spec SLUG]
     python3 docs/foundry/tooling/plan.py . done "<name>" [--on YYYY-MM-DD]
     python3 docs/foundry/tooling/plan.py . show
@@ -16,6 +16,8 @@ Writes only that one file.
 Format:
     estimate_hours = 30.0        # owner and agent hours for the planned work
     model_budget_usd = 90.0      # model and API budget
+    eval_budget_usd = 5.0        # optional: the part of it for live evals of the app's own model calls
+                                 # (qa-engineer playbook); runs are counted in model_use.jsonl
     hourly_rate_eur = 60.0       # optional: the owner's rate, for a margin on client work
     due = "2026-12-05"
     horizon = "now"              # now | next | later
@@ -41,7 +43,7 @@ try:
 except ImportError:  # pragma: no cover
     tomllib = None
 
-TOP = ("estimate_hours", "model_budget_usd", "hourly_rate_eur", "due", "horizon", "updated")
+TOP = ("estimate_hours", "model_budget_usd", "eval_budget_usd", "hourly_rate_eur", "due", "horizon", "updated")
 MS = ("name", "due", "start", "spec", "done")
 
 
@@ -89,6 +91,7 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("set")
     s.add_argument("--estimate-hours", type=_pos)
     s.add_argument("--budget-usd", type=_pos)
+    s.add_argument("--eval-budget-usd", type=_pos)
     s.add_argument("--rate-eur", type=_pos)
     s.add_argument("--due", type=_date)
     s.add_argument("--horizon", choices=["now", "next", "later"])
@@ -113,6 +116,7 @@ def main(argv: list[str] | None = None) -> int:
     ms = [dict(x) for x in plan.get("milestone", [])]
     if a.cmd == "set":
         vals = {"estimate_hours": a.estimate_hours, "model_budget_usd": a.budget_usd,
+                "eval_budget_usd": a.eval_budget_usd,
                 "hourly_rate_eur": a.rate_eur, "due": a.due, "horizon": a.horizon}
         if all(v is None for v in vals.values()):
             print("nothing to set", file=sys.stderr)

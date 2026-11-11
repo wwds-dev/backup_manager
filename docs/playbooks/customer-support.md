@@ -37,6 +37,14 @@ Statutory deadlines are read from the source each time._
   do, and what changes, in plain words.
 - A reply drafted by an agent is marked as a draft; if a reply is sent without a person
   editing it, it says it was written by an AI.
+- Client handover _(baseline 2026-11-11, client-delivery mode: not yet verified by a radar run)_: at Release the handover checklist
+  (`docs/foundry/tooling/handover_template.md`) is filled from the app's files and every item
+  names its evidence or is marked not applicable with the reason. Credentials and accounts the
+  client must own are transferred to the client's own accounts, never shared by sending
+  values in a document or a chat; the checklist names them, it never contains them.
+- The warranty covers what the accepted quote and the acceptance-and-warranty terms say, for
+  the period they say, starting from the handover date. A report inside it is triaged as in
+  warranty or as a change request, with the reason, before any work starts.
 - Retiring an app: users are told ahead, with the date, how to export their data, and when it
   is deleted.
 
@@ -48,3 +56,4 @@ incident-communication practice; store policies on support contact details.
 
 ## Change log
 - 2026-11-10: seeded (baseline) with Foundry v6.
+- 2026-11-11: client handover and warranty triage added with Foundry v9; baseline.

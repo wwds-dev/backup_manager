@@ -38,6 +38,21 @@ rules, thresholds and fee schedules are read from the source each time, with its
 - A client quote states scope, exclusions, fixed price or rate, payment schedule, acceptance
   criteria, how a change request is priced, the warranty period, and what the client must
   supply and by when. Nothing is promised that the spec does not contain.
+- Client delivery _(baseline 2026-11-11, client-delivery mode: not yet verified by a radar run)_: the order (client, quote, invoices, acceptances, change
+  requests, handover and warranty dates) lives in the Foundry HQ's private `orders/<id>.toml`;
+  the app repo holds only the documents (`docs/engagement/`), because the repo may be handed to
+  the client. The client accepts the quote and SOW in a way that can be shown later (a reply
+  email, a signature, minutes of a meeting) and that evidence is the acceptance's reference.
+- A change request after spec acceptance is priced like the quote: the scope difference, the
+  hours and the rate behind the price difference, and the date effect. Small changes are not
+  free by default; the owner may decide to waive a price, and that is recorded as their decision.
+- Payment schedule for fixed-price work ties instalments to accepted milestones (for example a
+  deposit at acceptance of the quote, the balance at acceptance of the delivery). A deposit is
+  taken only once a signed contract and, where personal data is involved, a DPA exist.
+- Invoices are records until the owner sends them: draft, sent, paid, each with its date. The
+  invoice template's required particulars (VAT number and rate, or the reason none is charged,
+  sequential number, supplier and customer details, date of supply) are checked against
+  Revenue's current guidance before the first one is sent.
 - Before the first paid order: business records separate from personal ones, an invoice
   template with the legally required particulars, and the owner's decision on professional
   indemnity and cyber insurance, each recorded with a date.
@@ -54,3 +69,5 @@ for every provider in `apps.md` stacks.
 
 ## Change log
 - 2026-11-10: seeded (baseline) with Foundry v6.
+- 2026-11-11: client-delivery practices added with Foundry v9 (order records, change-request
+  pricing, milestone payments, invoice records); baseline.

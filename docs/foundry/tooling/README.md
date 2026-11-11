@@ -55,6 +55,31 @@ unset and the workspace says "not recorded".
 | `plan.py . set\|milestone\|done\|show` | `plan.toml` | `/ship-feature`'s Plan step; the business case once the owner accepts it |
 | `record_approval.py . <gate> --words "<owner's words>" [--spec S]` | `approvals.jsonl` | the orchestrator, only right after the owner's explicit yes; refuses `comply` and `legal` |
 | `log_hours.py . <hours> [--note T]` | `time.jsonl` | the owner, or an agent typing the number the owner gave |
+| `model_use.py . --provider P --model M [--input-tokens N] [--output-tokens N] [--cost-usd X] [--purpose eval]` | `model_use.jsonl` | `local_model.py` for every local call; the orchestrator or a person for a live eval or API run |
+
+`record_approval.py` records only the **owner's** approvals. A client's acceptance (quote and SOW,
+a spec, a change request, the delivery) is recorded in the Foundry HQ's private order file with
+`tools/order.py accept`, which also holds change requests, handover and warranty dates and
+invoice states; `order.py gate <id> build --spec S` / `gate <id> done` are the client gates.
+
+## Local models
+`local_model.py` (stdlib) makes one call to an OpenAI-compatible chat endpoint on this machine,
+LM Studio's local server by default (`http://127.0.0.1:1234/v1`; `--base-url` or
+`LOCAL_MODEL_URL`, model from `--model` or `LOCAL_MODEL`, `--list` shows what the server offers).
+It refuses any host that is not loopback before sending anything, ignores proxy variables and
+does not follow redirects, fails closed with a message when the server is off (exit 4; it never
+falls back to a cloud model), has a timeout (`--timeout`, default 120 s), and counts every call in
+`model_use.jsonl` at zero cost without logging the prompt or the reply. Verified against LM
+Studio's docs on 2026-11-11 (`lmstudio.ai/docs/developer/openai-compat`, `.../core/server`,
+`.../cli/serve/server-start`): base URL `http://localhost:1234/v1`, `GET /v1/models`,
+`POST /v1/chat/completions`, `lms server start` binds 127.0.0.1 by default and reuses the last
+port; an API token is optional (`LM_API_TOKEN`, LM Studio 0.4.0+). The docs do not state the
+`usage` fields, so token counts are recorded when the server sends `prompt_tokens` /
+`completion_tokens` and left out otherwise.
+
+## Client handover
+`handover_template.md` is the checklist `customer-support` copies to `docs/engagement/handover.md`
+at Release for a `client` app (AGENTS.md, "Client delivery").
 
 ## What stays with the owner
 Every legal and tax sign-off. 

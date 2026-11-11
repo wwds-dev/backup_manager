@@ -8,7 +8,8 @@ rules above this repo still apply.
 The owner is the CEO and the only approver. Agents advise, build and review; they do not
 approve their own work. Two approvals are never an agent's: a **legal sign-off** (the owner or
 a lawyer) and a **tax sign-off** (the owner or an accountant). For a `client` app the client
-accepts the spec and the delivery; the owner still approves every gate.
+accepts the quote, each spec, each change and the delivery (below, "Client delivery"); the owner
+still approves every gate.
 
 ## Distribution tier
 `## Distribution` in app-context names one tier. It decides which business departments apply.
@@ -19,7 +20,7 @@ An app with no tier is `unclassified`: the dashboard warns and Release stops unt
 | `internal` | runs only on the owner's machines | no | register and licence inventory | no | no | none |
 | `public` | free; public repo or download | no | plus LICENSE, notices, disclaimers, privacy note, name check | optional | `SUPPORT.md`, security contact | owner |
 | `commercial` | paid | yes | full pack | yes | yes | owner; a lawyer while a lawyer trigger is open |
-| `client` | built to order for a named client | quote and SOW | contract pack and DPA | no | handover and warranty | owner; a lawyer for the contract templates and triggers |
+| `client` | built to order for a named client | quote and SOW, accepted by the client | contract pack and DPA | no | handover and warranty | owner; a lawyer for the contract templates (first use) and triggers |
 
 Raising the tier (for example `internal` to `public`) is itself a change: it goes through
 Comply before the first release at the new tier.
@@ -35,9 +36,12 @@ Every change that is more than a typo goes through these phases. Each ends in a 
 
 0. **Case** (`business-finance`; new app, new paid offer or client order; tiers `commercial`
    and `client`) -> `docs/business/case.md`: who pays, price, cost per unit, build budget, what
-   would make it not worth doing. For a client: `docs/engagement/quote.md`. **GATE**: go or no-go.
+   would make it not worth doing. For a client: `docs/engagement/quote.md` and the statement of
+   work draft `docs/engagement/sow.md`. **GATE**: go or no-go; for a client also **CLIENT GATE**:
+   the client accepts the quote and SOW (the owner sends them; no agent does).
 1. **Define** (`product-manager`) -> `docs/specs/<slug>.md`: problem, user, success measure,
-   non-goals. **GATE** for anything user-visible or new.
+   non-goals. **GATE** for anything user-visible or new. For a client: then **CLIENT GATE**, the
+   client accepts the spec as written (without its Design and Architecture sections).
 2. **Design** (`ux-designer`, user-facing changes only) -> section in the spec.
 3. **Architect** (`architect`) -> section in the spec; `docs/adr/NNNN-*.md` for decisions
    that are expensive to reverse. **GATE** if it touches state, concurrency, or module
@@ -59,11 +63,62 @@ Every change that is more than a typo goes through these phases. Each ends in a 
 11. **Launch** (`marketing`, `customer-support`; tiers per the table) ->
     `docs/launch/<version>.md` (positioning, listing copy, claims list, announcement plan) and
     `SUPPORT.md` / `docs/support/plan.md` (channel, response targets, known issues, refunds).
-12. **Release** (`sre-release`): build, sign, install, smoke test. **GATE**.
+12. **Release** (`sre-release`): build, sign, install, smoke test. **GATE**. For a client also
+    the handover checklist `docs/engagement/handover.md` (below), and **CLIENT GATE**: Release
+    counts as done only once the client has accepted the delivery.
 13. **Operate** (`customer-support`, `sre-release`, `product-manager`) -> feedback triaged into
     the backlog, incidents written up in `docs/support/incidents/`, and 30 days after a release
     `docs/business/review-<version>.md`: the success measure and the business case, measured.
     Retiring an app is a change too: user notice, data deletion, legal register closed.
+    For a client: the warranty window (from the order's handover date to its end) is tracked
+    here; a defect reported in it is triaged against what the warranty covers.
+
+**Client delivery (tier `client`).** The order lives in the Foundry HQ, not in this repo:
+`orders/<id>.toml`, private, written by `tools/order.py` (this repo may be handed to the client).
+`## Distribution` in app-context names it (`order: <id>`). Run client work from the HQ.
+- **Client gates** are recorded acts of the client, separate from the owner's approvals: the
+  client accepts the quote and SOW, each spec (after Define), each change request, and the
+  delivery. Each is recorded with who at the client, when, how (email, signature, meeting, call)
+  and the reference: `python3 tools/order.py accept <id> quote|spec|delivery|change ...`, by the
+  owner in a terminal or by the orchestrator quoting the owner's statement that the client
+  accepted (`--owner-words`). Never inferred from silence or from earlier messages.
+- **Agents never contact the client.** Every client-facing document (quote, SOW, spec, change
+  impact, handover, invoice) is a draft the owner sends. No agent sends, chases, invoices,
+  charges or accepts a contract.
+- **Change requests.** After the client accepted a spec, any change to it (or a new spec) is a
+  change request: `order.py change <id> new <cr> --spec <slug> --what ... [--price-eur N] [--due D]`.
+  `business-finance` drafts its price and date impact in `docs/engagement/changes.md`; the
+  product manager updates the spec; then the client and the owner each decide (client first,
+  so the client accepts the spec as changed). When both accept, the order's price and date move
+  and the plan gets a milestone.
+- **Before Build**, the orchestrator runs `python3 tools/order.py gate <id> build --spec <slug>`
+  in the HQ. It refuses when the quote or the spec is not accepted, when the spec changed after
+  the client accepted it, or when a change request for it is not accepted by both. No build
+  without it passing.
+- **Handover** at Release: `docs/engagement/handover.md` from
+  `docs/foundry/tooling/handover_template.md` (source and licence inventory, credentials the
+  client must own, deployment and runbook, data-processing and AI-use disclosures, support
+  contact, what the warranty covers and until when). Every line ticked `- [x]` or marked
+  `- [~] n/a: <reason>`. Then `order.py handover <id> --on D --warranty-days N`, and
+  `order.py gate <id> done` must pass: delivery accepted, checklist closed, dates recorded.
+- **Money** is records only, in the order: quote, invoices (draft, sent, paid, with dates).
+- **Contract pack** `docs/legal/client/` (services agreement, SOW, DPA, acceptance and
+  warranty terms), drafted by `legal-compliance` as DRAFT. Until a lawyer has signed the app's
+  pack once, the gate treats the templates as an open lawyer trigger.
+
+**Local models.** A local model (LM Studio's server on this machine) may draft; it never
+decides. `python3 docs/foundry/tooling/local_model.py --model <id> --prompt "..."` calls only a
+loopback address, fails closed when the server is off (no cloud fallback) and counts every call
+in `docs/foundry/model_use.jsonl` at zero cost. Backlog items it drafts carry the owner tag
+`@local`, and its output is accepted only after the same checks as any other work.
+- May go local: mechanical drafts a gate checks anyway (changelog and docstring drafts, test
+  scaffolds, data fixtures, renames), material with client or personal data that must not leave
+  the machine (summaries, redaction, classification), cheap first passes a stronger model or a
+  person then reviews.
+- Never local: a gate decision, code review, QA verdicts, security findings, legal findings,
+  architecture decisions, and anything a person signs.
+- Which model for which kind of work: `docs/playbooks/model-routing.md`. Every model the app
+  itself calls is listed in app-context's `## Models used`.
 
 **Legal consults.** Besides Comply, `legal-compliance` reviews three times, read-only, like a
 domain specialist: at **Define** (which regimes the change touches: personal data, consumers,
@@ -146,7 +201,14 @@ agent typing the number the owner gave.
   vulnerable dependency.
 - `legal_gate.py check` passes for the app's tier, and every claim in release notes, listing
   and landing copy is on the checked claims list.
-- For `commercial` and `client`: the support channel in `SUPPORT.md` is live and answered.
+- For `public` and `commercial`: `SUPPORT.md` and a private security contact (`SECURITY.md`,
+  a `security.txt` or a security section in `SUPPORT.md`) exist; for `commercial` the support
+  channel is live and answered (the Foundry workspace warns P1 when either file is missing).
+- For `client`: the client accepted the delivery, the handover checklist is closed and the
+  warranty end is recorded (`order.py gate <id> done` passes in the HQ).
+- An app that calls a model: unit tests use fakes or recorded fixtures, never a live model; the
+  live eval suite ran on the cheapest adequate model within the plan's eval budget, its cost
+  recorded (`model_use.py --purpose eval`).
 
 ## Rules for agents
 - **Write to files, not chat.** A finding that is not in a file did not happen.
@@ -180,6 +242,8 @@ every sign-off.
 `docs/launch/` launch plans · `docs/support/` support plan, FAQ, incidents ·
 `docs/playbooks/` role practices · `docs/foundry/app-context.md` this app's facts ·
 `docs/foundry/plan.toml` estimates and milestones · `docs/foundry/approvals.jsonl` gate
-approvals · `docs/foundry/activity.jsonl` phase log · `docs/foundry/time.jsonl` owner hours.
+approvals · `docs/foundry/activity.jsonl` phase log · `docs/foundry/time.jsonl` owner hours ·
+`docs/foundry/model_use.jsonl` model runs (local and eval) · `docs/engagement/` quote, SOW,
+change impacts, handover (client apps; the order itself is in the Foundry HQ).
 Agents in `.claude/agents/`; commands `/ship-feature`, `/audit`, `/legal-check`, `/harden`,
 `/radar-check` in `.claude/commands/`.

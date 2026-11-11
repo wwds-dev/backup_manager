@@ -2,14 +2,19 @@
 """Record the owner's approval of an ordinary pipeline gate in docs/foundry/approvals.jsonl.
 
     python3 docs/foundry/tooling/record_approval.py . <gate> --words "<the owner's words, verbatim>"
-                                                     [--spec SLUG] [--by owner|client] [--note TEXT]
+                                                     [--spec SLUG] [--note TEXT]
 
 gate: case define design architect plan release, or `decision` for an owner decision outside a gate.
 
 Who writes it: the orchestrator (/ship-feature, /audit), and only right after the owner said yes
 in that same conversation, quoting what they said. Silence, "looks fine?" from an agent, or an
-approval inferred from earlier work is not an approval. `--by client` is for a `client` app,
-where the client accepts the spec and the delivery; the owner still approves every gate.
+approval inferred from earlier work is not an approval. Only the owner's approvals go here.
+
+What a client did (accepted the quote and statement of work, a spec, a change request, the
+delivery) is not an owner approval: it is recorded in the Foundry HQ's private order file with
+who at the client, when, how and the reference: `python3 tools/order.py accept <order> ...`
+(run in the HQ). `--by client` is refused here and says so. For a `client` app the owner still
+approves every gate here, and the client's acceptance is a separate gate beside it.
 
 What it is never for: the legal sign-off. `comply`, `legal` and `signoff` are refused here: that
 is `legal_gate.py sign`, run by a person in a terminal. The tax sign-off is the `## Sign-off`
@@ -42,6 +47,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--note", default=None)
     a = ap.parse_args(argv)
     gate = a.gate.strip().lower()
+    if a.by == "client":
+        print("refused: a client's acceptance is not an owner approval. Record it in the Foundry HQ with "
+              "`python3 tools/order.py accept <order> quote|spec|delivery|change --who ... --on ... --how ... "
+              "--ref ...` (who at the client, when, how, the reference).", file=sys.stderr)
+        return 3
     if gate in REFUSED:
         print("refused: a legal or tax sign-off is not an ordinary gate. The owner or a lawyer runs "
               "`python3 docs/foundry/tooling/legal_gate.py sign . --by \"<name>\" --role owner|lawyer` "

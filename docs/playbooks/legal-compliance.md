@@ -110,6 +110,20 @@ Dates, thresholds and exemptions in particular must be read from the source each
 - Tell the client, in writing, that the software is built with AI assistance and lists its
   open-source components; who owns the result is stated in the contract, not assumed.
 
+**Client contract pack** _(baseline 2026-11-11, client-delivery mode: not yet verified by a radar run)_
+- Four templates in `docs/legal/client/`: services agreement (parties, scope by reference to
+  the SOW, fees and payment, IP and licence of the result, confidentiality, liability cap,
+  termination, governing law), SOW template, data-processing agreement (Art. 28 GDPR content:
+  subject matter, duration, nature and purpose, data types, categories of data subjects,
+  sub-processors including every model or API provider from app-context's `## Models used`),
+  and acceptance-and-warranty terms (how specs, changes and the delivery are accepted, the
+  acceptance period, what silence means, warranty scope and period). Each is DRAFT and each
+  carries a `- [ ] LAWYER:` trigger on first use. Articles and section numbers are read from the
+  primary source and cited with a date.
+- `## Models used` is the processor list's starting point: each provider that receives client
+  or personal data is named in the DPA before that data reaches it; a local model is not a
+  recipient as far as the code shows nothing leaves the machine.
+
 **Wording**
 - Documents are `DRAFT` or `CHECKED (agent)` until a person signs. The agent never writes
   "compliant", "approved", "legally reviewed" or "GDPR-ready", and flags any copy that does
@@ -125,4 +139,6 @@ terms of every model and API provider in `apps.md` stacks.
 
 ## Change log
 - 2026-11-10: seeded (baseline) with Foundry v6.
+- 2026-11-11: client contract pack (four templates, first-use lawyer trigger) and the `## Models used`
+  processor rule added with Foundry v9; baseline.
 - 2026-11-10: per-tier file list, trigger evidence rule, commercial-activity column, nested-repo and bundle-listing licence checks and owner-run name searches added from the first pilot audit (`audits/sonar/legal.md`); still baseline.
