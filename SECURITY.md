@@ -1,5 +1,3 @@
-<!-- Owner: enable GitHub's private vulnerability reporting for wwds-dev/backup_manager (Settings > Code security > Private vulnerability reporting); the form linked below does not work until then. Delete this comment afterwards. -->
-
 # Security
 
 Backup Control Center is free, open-source software maintained by one person. It holds OAuth tokens for your cloud accounts in the macOS Keychain and runs a backup job over your files,
