@@ -45,6 +45,9 @@ LICENSE, privacy note, name check and sign-off.
 <things agents must never do or imply, e.g. "no real money", "no network calls", copy rules>
 - Start every background `QThread` with `start_thread()` (or `replace_worker()`) in `main.py`, never bare `.start()`: the keeper holds it until `finished`, so no owner (a tile deleted by refresh, a closed dialog) can destroy it mid-run. Never `QThread.terminate()`. Guarded by `tests/test_thread_lifetime.py`.
 
+## Models used
+None. Inventory from the code on 2026-11-11 (Foundry v9): no model is called. The only match is the Lab Health page measuring the size of `~/.cache/huggingface` on disk (`lab_health.py:1181`), not a model call.
+
 ## Domain specialist
 None. For a regulated or expert domain (money, insurance, health, law, ...), name the key
 (`finance`, `insurance-compliance`, ...) and list: the domain, the rules and standards that apply
