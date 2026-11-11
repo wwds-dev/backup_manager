@@ -1,7 +1,7 @@
 ---
 role: legal-compliance
-last-reviewed: 2026-11-10
-status: baseline   # baseline = seeded, not yet verified by a radar run; becomes current after first approved review
+last-reviewed: 2026-11-11
+status: current
 ---
 
 # Playbook: legal-compliance
@@ -40,25 +40,53 @@ Dates, thresholds and exemptions in particular must be read from the source each
   listed category. Not having read the rule is not a reason to drop it and not, alone, a
   reason to raise it: record "rule not verified" beside the trigger or in the row.
 - Each row also answers "does this turn on commercial activity?". Several regimes exclude free,
-  non-monetised open source; the row says what would end that (a paid build, paid support,
-  donations tied to the app), so a later change of tier or monetisation reopens it.
+  non-monetised open source; the row says what would end that (a paid build; support charged
+  above cost recovery; monetising through another service; requiring personal data beyond what
+  security, compatibility or interoperability need; donations above design, development and
+  provision costs — CRA recitals 15-18), so a later change of tier or monetisation reopens it.
 - Regimes to rule in or out for every app: GDPR and the Irish Data Protection Act 2018;
   ePrivacy rules (S.I. 336/2011: cookies and local storage, electronic direct marketing);
-  Consumer Rights Act 2022 (digital content and services, pre-contract information, withdrawal,
-  unfair terms); seller-identification duties for online services and for a registered business
+  Consumer Rights Act 2022 (Part 3 digital content and digital services, including free ones
+  paid for with personal data; Part 5 information and cancellation; Part 6 unfair terms; in force
+  29 Nov 2022, S.I. 596/2022); seller-identification duties for online services and for a registered business
   name; EU AI Act; Cyber Resilience Act; European Accessibility Act; Digital Services Act (only
   when the app hosts other people's content); product-liability rules for software; and any
   sector rule the domain specialist names.
+- CRA (Reg. 2024/2847): applies from 11 Dec 2027; reporting of actively exploited
+  vulnerabilities and severe incidents (Art. 14) since 11 Sep 2026.
+- Product Liability Directive (EU) 2024/2853: software is a product; FOSS developed or supplied
+  outside a commercial activity is excluded (Art. 2(2)); applies to products placed on the
+  market after 9 Dec 2026 (transposition deadline the same day; check the Irish transposing act).
+- EAA (Dir. 2019/882): services to consumers from 28 June 2025, incl. e-commerce and e-books with
+  their dedicated software. A microenterprise (<10 staff and turnover or balance sheet ≤ €2m) is
+  exempt for services, not for products. A client who is a microenterprise is exempt; the owner
+  building the site is not the service provider.
+- Gambling (Ireland): the Gambling Regulation Act 2024 licenses providing betting (bookmaker,
+  remote betting intermediary, taking bets: s.3) and, once s.70 is commenced, *selling or
+  supplying* a gambling product (software used in connection with gambling) or a gambling related
+  service (any service in the course of business relating to a gambling activity) without a
+  Business-to-Business licence. A tool that prices bets or sizes stakes but takes none is outside
+  s.3; whether a *paid* version is a gambling product or related service under s.70 is a lawyer
+  trigger. Check the commencement table (irishstatutebook.ie/eli/isbc/2024_35.html) at every
+  audit; on 2026-11-11 ss.70-72 and 143-151 were not commenced.
 - A disclaimer describes the product; it does not make a regulated activity unregulated. "Not
   financial advice" on something that behaves like advice is a lawyer trigger, not a fix.
 
 **Licences**
 - Inventory from the lockfile or installed set, not from memory; record tool and command.
-- Copyleft and weak copyleft components get their obligations spelled out per build: for an
-  LGPL library shipped inside a bundle (Qt / PySide6), the licence text and notices ship with
-  the app, the library stays replaceable (separate shared libraries, not statically merged),
-  and the app's own licence does not forbid that. GPL components in a bundle the owner wants to
-  keep closed are a P0.
+- Copyleft and weak copyleft components get their obligations spelled out per build. For an
+  LGPL-3.0 library shipped inside a bundle (Qt / PySide6, FFmpeg's LGPL builds): ship the LGPL
+  **and** GPL texts and a prominent notice that the library is used; put the library's copyright
+  notice in any About box; keep it dynamically linked and replaceable; provide the library's
+  corresponding source (for the exact version shipped, even unmodified) with the app or a
+  written offer for it; and make sure the app's licence or terms do not forbid modifying the
+  library or reverse engineering to debug such modifications (LGPL-3.0 §4; qt.io 'Obligations
+  of the GPL and LGPL'). GPL components in a bundle the owner wants to keep closed are a P0.
+  Qt modules that are GPL-only for open-source users are listed on doc.qt.io/qt-6/licensing.html
+  for the version in the bundle (Qt 6.12, read 2026-11-11: Canvas Painter, CoAP, Graphs, GRPC,
+  HTTP Server, Lottie, MQTT, Network Authorization, Qml Compiler, Quick 3D (+Physics), Quick
+  Timeline, Virtual Keyboard, Wayland Compositor). Check the bundle listing against that list on
+  every Qt upgrade; plugins pull some in unasked (Virtual Keyboard via `platforminputcontexts`).
 - Models, APIs, datasets, fonts, icons and stock or generated media are components too: record
   the terms on commercial use, attribution, redistribution, training on inputs, and who owns
   the output. An unofficial or scraped endpoint is recorded as such, with the provider's terms.
@@ -73,19 +101,42 @@ Dates, thresholds and exemptions in particular must be read from the source each
 - Data map first, notice second: what, whose, purpose, lawful basis, storage, retention,
   recipients. Every model or API provider that receives personal data is a recipient: record
   the data-processing terms and the transfer mechanism for providers outside the EEA.
-- DPIA screening against the Data Protection Commission's list on every new data flow; a
-  possible "yes" is a lawyer trigger until a DPIA is done.
+- DPIA screening on every new data flow, written down: Art. 35(3) cases, then the DPC's
+  Art. 35(4) list (10 types; for these apps chiefly profiling of children or vulnerable people
+  for marketing, algorithmic decisions on access to services, tracking behaviour or location,
+  large-scale profiling, indirectly sourced data, combined datasets), then the WP248 criteria
+  (two or more usually means a DPIA). Record why a DPIA is or is not needed; a possible 'yes' is
+  a lawyer trigger until a DPIA is done.
+- For a US provider, record whether it is certified under the EU-US Data Privacy Framework
+  (Decision (EU) 2023/1795, Art. 45) or relies on SCCs (Art. 46). The DPF is under appeal
+  (C-703/25 P); a ruling against it would leave SCCs as the fallback, so keep the provider's DPA
+  with SCCs on file.
 - Local-only claims ("nothing leaves this Mac") are verified against the code's network calls
   and stated in the privacy note only as far as the evidence goes.
 - A breach procedure names who decides and the notification deadline to the regulator; the
   agent never decides whether a breach is notifiable.
 
 **Terms and consumer law**
-- Selling to consumers: pre-contract information, the withdrawal right and the conditions
-  under which digital content loses it, conformity and remedies, and price shown inclusive of
-  tax. Terms cannot remove statutory rights; draft them not to try.
-- The seller is identified wherever the app is offered: name or registered business name,
-  geographic address, contact route.
+- Selling to consumers: pre-contract information; the 14-day cancellation right (CRA 2022
+  ss.112-113) and when it is lost — paid digital content only with prior express consent, an
+  acknowledgement of loss and confirmation on a durable medium (s.111(e), s.109(3)); a digital
+  service only once fully supplied (s.111(c)); missing cancellation information extends the
+  period up to 12 months (s.114); refunds within 14 days (s.117); conformity, updates and
+  remedies (Part 3); price shown inclusive of tax. Terms cannot remove statutory rights; draft
+  them not to try.
+- The seller is identified wherever the app is offered (S.I. 68/2003 reg. 7): name (and
+  registered business name), geographic address, an email address, the register and number of
+  any public register the seller is on (company or business-name register), the VAT number once
+  registered, and any authorisation or professional body. Prices say whether they include tax
+  and delivery.
+- A sole trader selling under any name other than their own surname registers it with the CRO
+  within one month of adopting it (RBNA 1963 ss.3, 6), and then puts their true name on business
+  letters, circulars and catalogues carrying that name (s.18). Check the Act as amended before
+  relying on s.18's wording.
+- Paid apps sold to consumers: terms say whether and why the app may change; a change beyond
+  keeping it working is announced in advance on a durable medium and, if it makes the app worse
+  to use, lets the buyer terminate free of charge (CRA 2022 s.64). Security and conformity
+  updates promised in the contract are supplied.
 
 **Name**
 - Before a name is used in public: identical and similar marks in the EUIPO and Irish registers
@@ -97,11 +148,49 @@ Dates, thresholds and exemptions in particular must be read from the source each
 - A working name is recorded as one, and blocks tier `public` and above until cleared.
 
 **EU AI Act**
-- State the role (provider or deployer) and the reasoning. Screen against prohibited practices
-  and the high-risk list; anything arguable is a lawyer trigger.
-- Transparency: a person talking to a model is told so; synthetic audio, image, video and text
-  published as content is marked as the Act and its guidance require. Record the mechanism.
+- Cite the AI Act as 'Reg. (EU) 2024/1689 as amended by Reg. (EU) 2026/1744' and read the
+  consolidated text on EUR-Lex (CELEX 02024R1689-<latest date>), not the 2024 original: articles
+  4, 5, 6, 50(7), 111 and 113 were changed in 2026.
+- State the role (provider or deployer) and the reasoning. Free of charge still counts
+  (Art. 3(3)). A natural person using the app for purely personal, non-professional purposes has
+  no deployer duties (Art. 2(10)); the owner using his own app for his business is a deployer.
+  Screen against prohibited practices and the high-risk list; anything arguable is a lawyer
+  trigger.
+- From 2 Dec 2026 (Art. 5(1)(ba), (bb), (1a)): a system that can generate realistic intimate or
+  sexually explicit imagery, video or audio of an identifiable person without explicit consent,
+  or child sexual abuse material, is prohibited if that output is reasonably foreseeable and
+  reproducible and the system lacks adequate technical safeguards. For any app that generates
+  images, video or voice, record the safeguards (provider content filters kept on, prompt
+  refusals, no face or likeness upload without consent) with file:line, and treat a gap as a
+  lawyer trigger.
+- A free and open-source licence exempts an AI system from the Act except for Art. 5
+  (prohibited), high-risk systems, and Art. 50 (Art. 2(12)). An open-source generative app still
+  owes Art. 50.
+- Transparency (Art. 50, applies from 2 Aug 2026). Provider duties: 50(1) people interacting
+  directly with the system are told it is AI unless obvious; 50(2) every synthetic audio, image,
+  video or text output of the system is marked in a machine-readable, detectable way (exception:
+  assistive standard editing, or output that does not substantially alter the input). Deployer
+  duties: 50(4) disclose deep fakes (for evidently artistic, creative, satirical or fictional
+  work, in a way that does not hamper it), and disclose AI-generated text published to inform
+  the public on matters of public interest unless a person reviewed it and holds editorial
+  responsibility. 50(5): give the information clearly at the first interaction or exposure.
+  Record the marking mechanism per output type (metadata field, C2PA manifest, provider
+  watermark kept on) and test that the app does not strip it.
+- Art. 111(4) gives providers of systems already on the market before 2 Aug 2026 until 2 Dec
+  2026 to meet Art. 50(2); a system first placed on the market on or after 2 Aug 2026 has no
+  grace. Art. 50(1) and 50(4) are not deferred.
+- Read the Commission's Guidelines on transparency obligations (20 July 2026) and the Code of
+  Practice on transparency of AI-generated content (final 10 June 2026) before choosing a
+  marking mechanism; record which measures of the code the app follows.
 - Keep the upstream model provider's documentation and usage terms with the pack.
+- Model-provider terms: read each provider's usage policy at every audit and record its
+  effective date. Anthropic's (effective 2026-11-12) requires, for a personalised
+  buy/sell/hold recommendation on specific securities or digital assets, review by a qualified
+  person before delivery and telling the person AI was used; and an AI-disclosure at the start
+  of every consumer-facing chat. OpenAI's (effective 2026-11-20) prohibits 'real money
+  gambling' and tools giving 'tailored advice that requires a license' without a licensed
+  professional. A feature that falls under one of these is a finding, even when the law does
+  not reach it.
 
 **Client work**
 - The first services agreement, statement of work and data-processing agreement templates are a
@@ -142,3 +231,4 @@ terms of every model and API provider in `apps.md` stacks.
 - 2026-11-11: client contract pack (four templates, first-use lawyer trigger) and the `## Models used`
   processor rule added with Foundry v9; baseline.
 - 2026-11-10: per-tier file list, trigger evidence rule, commercial-activity column, nested-repo and bundle-listing licence checks and owner-run name searches added from the first pilot audit (`audits/sonar/legal.md`); still baseline.
+- 2026-11-11: first radar review (current), from `radar/reports/2026-11-11-legal.md`, owner-accepted rows A-L1, A-L2, A-L3, A-L4, A-L5, A-L6, A-L9, A-L10, A-L11, A-L12, A-L13, A-L14, A-L17, B-L1, B-L3, B-L4, B-L5, B-L6, B-L7, B-L8, B-L9, B-L10. P3 rows (A-L7, A-L8, A-L15, A-L16, A-L18, B-L11) not applied.

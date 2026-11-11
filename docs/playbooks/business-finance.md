@@ -1,7 +1,7 @@
 ---
 role: business-finance
-last-reviewed: 2026-11-10
-status: baseline   # baseline = seeded, not yet verified by a radar run; becomes current after first approved review
+last-reviewed: 2026-11-11
+status: current
 ---
 
 # Playbook: business-finance
@@ -29,12 +29,19 @@ rules, thresholds and fee schedules are read from the source each time, with its
   measured agent time and model use, and the review compares
   it with what was spent.
 - Price is a decision with reasons: cost floor, what alternatives charge, what the payer said.
-  A reduction shown against an earlier price uses the lowest price of the preceding period the
-  law names, not an invented "was" price.
+  A reduction shown against an earlier price: for goods, the prior price is the lowest price in
+  the 30 days before the reduction (CCPC; S.I. of 2022 on product prices); for apps, digital
+  content and services that rule does not apply, but a 'was' price must still be a real one, or
+  it is a misleading practice.
 - VAT and income tax are flagged, not decided: the case states the questions (registration
-  thresholds, place of supply for digital services to consumers in other member states, the
-  One-Stop-Shop, whether a merchant of record would take that on) and the `## Sign-off` section
-  records who answered them.
+  thresholds, place of supply for digital services to consumers in other member states — Irish
+  VAT only while EU cross-border B2C digital services plus distance sales of goods stay at or
+  under €10,000 in the current and previous calendar year, then the customer's country's VAT
+  through the One-Stop-Shop, whether a merchant of record would take that on) and the
+  `## Sign-off` section records who answered them.
+- Read the thresholds from Revenue each time (2026-10-27 page: €42,500 services, €85,000 goods);
+  the case records turnover against them, and registration falls due within 30 days of the sale
+  that crosses one.
 - A client quote states scope, exclusions, fixed price or rate, payment schedule, acceptance
   criteria, how a change request is priced, the warranty period, and what the client must
   supply and by when. Nothing is promised that the spec does not contain.
@@ -71,3 +78,4 @@ for every provider in `apps.md` stacks.
 - 2026-11-10: seeded (baseline) with Foundry v6.
 - 2026-11-11: client-delivery practices added with Foundry v9 (order records, change-request
   pricing, milestone payments, invoice records); baseline.
+- 2026-11-11: first radar review (current), from `radar/reports/2026-11-11-legal.md`, owner-accepted rows B-B1, B-B2, B-B5. A-B1 superseded by B-B5; P3 rows (A-B2, B-B3, B-B4) not applied.
