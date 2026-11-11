@@ -42,7 +42,11 @@ Every change that is more than a typo goes through these phases. Each ends in a 
 3. **Architect** (`architect`) -> section in the spec; `docs/adr/NNNN-*.md` for decisions
    that are expensive to reverse. **GATE** if it touches state, concurrency, or module
    boundaries.
-4. **Plan** -> tasks in the backlog with priority, category and owner.
+4. **Plan** -> tasks in the backlog with priority, category and owner, and a milestone for the
+   change (due date, the spec it delivers) plus the estimate in `docs/foundry/plan.toml`:
+   `python3 docs/foundry/tooling/plan.py . milestone "<what ships>" --due YYYY-MM-DD --spec <slug>`
+   and `plan.py . set --estimate-hours <h>`. An estimate nobody made stays unset: never fill in a
+   default.
 5. **Build** (`engineer`) on a branch, tests first or alongside, small commits.
 6. **Review** (`code-reviewer`): a different agent from the author, read-only.
 7. **Verify** (`qa-engineer`): test plan against the success measure, mutation-check new
@@ -114,10 +118,23 @@ old). It proposes only: nothing is installed, enabled or connected without the o
 
 **Log activity.** At the start and end of each phase, run
 `python3 docs/foundry/tooling/log_activity.py . <phase> start|done [--spec <slug>]` (phases:
-case define design architect build review verify secure document comply launch release
-operate; use `blocked` when stopped on a gate). The Foundry dashboard reads it to show what is
-in progress. It records nothing else and never blocks work: if the command fails, say so and
-continue.
+case define design architect plan build review verify secure document comply launch release
+operate; use `blocked` when stopped on a gate). The Foundry workspace reads it, live, to show
+what is in progress. It records nothing else and never blocks work: if the command fails, say
+so and continue.
+
+**Record approvals.** When the owner approves a gate (Case, Define, Architect, Release, or a
+decision), the orchestrator records it right after the owner's explicit yes in that same
+conversation, quoting their words:
+`python3 docs/foundry/tooling/record_approval.py . <gate> --spec <slug> --words "<what they said>"`.
+Never from silence, never inferred from earlier work, never on the owner's behalf in a later
+session. It refuses `comply`: the legal sign-off is only `legal_gate.py sign`, run by a person.
+The workspace shows each gate as approved (who, when, the words) or "approval not recorded".
+
+**Time.** Agent time and model use are measured from Claude Code's session transcripts by the
+Foundry HQ; nothing to record. The owner's own hours are a manual entry:
+`python3 docs/foundry/tooling/log_hours.py . <hours> [--note TEXT]`, run by the owner or by an
+agent typing the number the owner gave.
 
 ## Definition of done
 - The success measure is demonstrably met (a test, a number, or a screenshot).
@@ -161,6 +178,8 @@ every sign-off.
 `docs/specs/` specs · `docs/adr/` decisions · `docs/audit/` review reports ·
 `docs/legal/` legal pack and `signoff.jsonl` · `docs/business/` case, pricing, reviews ·
 `docs/launch/` launch plans · `docs/support/` support plan, FAQ, incidents ·
-`docs/playbooks/` role practices · `docs/foundry/app-context.md` this app's facts.
+`docs/playbooks/` role practices · `docs/foundry/app-context.md` this app's facts ·
+`docs/foundry/plan.toml` estimates and milestones · `docs/foundry/approvals.jsonl` gate
+approvals · `docs/foundry/activity.jsonl` phase log · `docs/foundry/time.jsonl` owner hours.
 Agents in `.claude/agents/`; commands `/ship-feature`, `/audit`, `/legal-check`, `/harden`,
 `/radar-check` in `.claude/commands/`.

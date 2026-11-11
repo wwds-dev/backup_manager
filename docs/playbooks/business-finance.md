@@ -24,7 +24,9 @@ rules, thresholds and fee schedules are read from the source each time, with its
 - Cost per unit is built from published price lists: model and API usage per typical session,
   payment-provider fee, store commission, hosting. A price that could not be found is
   "unknown" and blocks a margin claim; it is never entered as zero.
-- The build has a budget in the case (owner hours and paid model usage) and the review compares
+- The build has a budget in the case (owner hours and paid model usage), copied into
+  `docs/foundry/plan.toml` once accepted so the Foundry workspace can compare it with the
+  measured agent time and model use, and the review compares
   it with what was spent.
 - Price is a decision with reasons: cost floor, what alternatives charge, what the payer said.
   A reduction shown against an earlier price uses the lowest price of the preceding period the

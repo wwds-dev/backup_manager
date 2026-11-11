@@ -45,6 +45,17 @@ HQ (`audits/<app>/legal/`) and makes `docs/legal` a git-ignored link to it. The 
 the link and the hash is unchanged by the move. A fresh clone or a git worktree has no link: run
 the gate from the main checkout, and `install.sh --update` puts a missing link back.
 
+## Records the Foundry workspace reads
+Stdlib only; each writes one file in `docs/foundry/` and nothing else. A value nobody entered stays
+unset and the workspace says "not recorded".
+
+| Tool | File | Who runs it |
+|---|---|---|
+| `log_activity.py . <phase> start\|done\|blocked [--spec S] [--note T]` | `activity.jsonl` | the orchestrator, at each phase start and end |
+| `plan.py . set\|milestone\|done\|show` | `plan.toml` | `/ship-feature`'s Plan step; the business case once the owner accepts it |
+| `record_approval.py . <gate> --words "<owner's words>" [--spec S]` | `approvals.jsonl` | the orchestrator, only right after the owner's explicit yes; refuses `comply` and `legal` |
+| `log_hours.py . <hours> [--note T]` | `time.jsonl` | the owner, or an agent typing the number the owner gave |
+
 ## What stays with the owner
 Every legal and tax sign-off. 
 GitHub branch protection (require CI + review before merge), enabling the GitHub connector,
