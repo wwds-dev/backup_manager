@@ -6,7 +6,7 @@ status: baseline   # baseline = seeded, not yet verified by a radar run; becomes
 
 # Playbook: security-engineer
 
-Canonical copy lives in the company repo; apps receive it via `install.sh --update`.
+Canonical copy lives in the Foundry repo; apps receive it via `install.sh --update`.
 Changes come from `radar/reports/` and need owner approval.
 
 ## Scope

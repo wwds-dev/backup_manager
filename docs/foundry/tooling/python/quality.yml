@@ -1,4 +1,4 @@
-# Fill every __PLACEHOLDER__ from docs/company/app-context.md (see .claude/commands/harden.md).
+# Fill every __PLACEHOLDER__ from docs/foundry/app-context.md (see .claude/commands/harden.md).
 # __RUNNER__: macos-latest for macOS-only or native-Qt apps, else ubuntu-latest.
 # __INSTALL_CMD__ must also install coverage. __TEST_CMD__ must write coverage data, e.g.
 #   python -m coverage run --source=<pkg>,<pkg> -m pytest
@@ -36,4 +36,4 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - run: pip install ruff
       - name: Lint ratchet
-        run: python docs/company/tooling/ratchet.py ruff ruff check --no-cache --quiet --output-format=concise --exit-zero .
+        run: python docs/foundry/tooling/ratchet.py ruff ruff check --no-cache --quiet --output-format=concise --exit-zero .

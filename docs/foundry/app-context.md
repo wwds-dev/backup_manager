@@ -6,6 +6,19 @@ true. Agents treat the **Invariants** as hard rules.
 ## Product
 <one paragraph: what it is, who it is for, what it must never claim or do>
 
+## Distribution
+tier: public
+
+Status: proposed by agent, not yet confirmed by the owner (2026-11-11). To confirm, delete this
+line; to change the tier, edit `tier:` first. Release stays stopped while this line is here.
+
+Evidence: the repo `wwds-dev/backup_manager` is public (checked 2026-11-11); it has no
+`LICENSE`, no GitHub release, no download page and no store listing. Nobody pays and it takes no
+payment. Personal data: the owner's own backup folder list and Google Drive / Dropbox OAuth
+tokens (Keychain), nobody else's. `public` is proposed only because the source is published; if
+nobody else is meant to use it, making the repo private and setting `internal` removes the
+LICENSE, privacy note, name check and sign-off.
+
 ## Stack
 <languages, frameworks, with versions; the radar reads this to know what to watch>
 
