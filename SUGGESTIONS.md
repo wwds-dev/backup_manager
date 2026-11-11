@@ -50,6 +50,10 @@ Status: `IDEA` · `CONSIDERING` · `PLANNED` · `DONE` · `REJECTED`
 | iCloud local cache tile and Time Machine status card | Aug 2026 |
 | `rsync --stats` and `--itemize-changes` on every run | Aug 2026 |
 | Per-run (not per-day) backup history — multiple runs sharing one daily log were collapsing to the day's first run's status everywhere it was read | Sep 2026 |
+| Lab Health: each env judged by its own last use (evidence remembered across scans), never offered while anything runs from it, duplicates flagged | Nov 2026 |
+| Lab Health: rebuild record saved before an env is trashed, and **♻ Rebuild missing envs** to recreate it | Nov 2026 |
+| Lab Health: commit warnings (secrets, generated files, big files, mid-merge, …) and multi-project commit | Nov 2026 |
+| Lab Health: idle thresholds set in the card, *Show largest folders*, and an *Other caches* report with the tools' own cleanup | Nov 2026 |
 
 ## Rejected
 

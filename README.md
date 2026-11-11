@@ -122,34 +122,84 @@ rsync exclude patterns, and see the total local size of the backup set.
 ---
 
 ### Lab Health
-Table of every project in `lab/active/` with total size, reclaimable space split into
-**Caches** and **Envs**, days idle, git status, and manifest/`.env` warnings. Git
-worktrees (`.git` as a file, e.g. `imprint-base`) count as git repos.
+Table of every project in `lab/active/` with columns **Caches · Envs · Project · Total ·
+Idle · Git · Manifest / .env**: reclaimable space split into caches and environments,
+total size, days idle, git status, and manifest/`.env` warnings. Git worktrees (`.git` as
+a file, e.g. `imprint-base`) count as git repos.
 
 - **Caches** (`__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.cache`) —
   regenerate by themselves, so they are always offered and are deleted permanently.
 - **Envs** (`.venv`, `venv`, `env`, `node_modules`, `build`, `dist`) — cost a rebuild, so
-  a project's envs are offered only when it has been **idle 30+ days** (`IDLE_DAYS` in
-  `lab_health.py`; last commit or newest source edit) **and** a lockfile or manifest says
-  how to rebuild (`uv sync`, `pip install -r requirements.txt`, `npm ci`, …). Otherwise the
-  cell shows 🔒 and a tooltip gives the reason. Envs go to the **Trash** (restore with Put
-  Back; the disk space is freed once you empty it). Only git-ignored folders are offered.
-- Nothing is ticked by default. **☑ Select all safe** ticks everything offered (click
-  again to clear). A ticked box turns its size and the project name **red** and the card
-  shows "Will delete: N MB in M folders"; grey = stays (locked or linked).
-- **🧹 Clean up checked** — acts on the ticked boxes after a confirmation dialog that
-  lists each folder and its rebuild command. Never touched: source code, git history,
-  uncommitted changes, `.env` files. The tick boxes are not row selection.
-  Symlinked or out-of-tree projects (marked ↗, e.g. `altmerch_store`, `syndustryx`) are
-  never cleaned from here (greyed). Every deleted path must lie inside its own project.
+  each is offered only when a lockfile or manifest says how to rebuild it (`uv sync`,
+  `pip install -r requirements.txt`, `npm ci`, …), **nothing runs from it**, and it is idle:
+  a `.venv` / `venv` / `env` / `node_modules` by **its own last use** (unused **7+ days** by
+  default, `ENV_IDLE_DAYS`, even inside an active project); `build` / `dist` by the
+  **project's** idle time (**30+ days** by default, `IDLE_DAYS`; last commit or newest
+  source edit). Otherwise the cell shows 🔒 and its tooltip gives the reason, the last use
+  and what it was, the rebuild command, and any duplicate. Envs go to the **Trash**
+  (restore with Put Back; the disk space is freed once you empty it). Only git-ignored
+  folders are offered (in a folder without git, never `build`, `dist` or `env`).
+- **Thresholds** — the two day boxes under the buttons (*Offer .venv / node_modules after
+  N days unused · build / dist after the project is idle N days*, 1–365) set both limits.
+  A change rescans at once and is saved to `lab_health_settings.json`.
+- **Last use** comes from what running a project leaves behind, because running code
+  leaves no trace in the env itself: installs into the env (`bin/`, `pyvenv.cfg`, npm/pnpm
+  state files), `.pyc` compiled from the project's sources, `.pytest_cache`, `*.log` files,
+  `uv.lock`, dev-server caches (`.vite`, `.next`, `.turbo`), Lab Hub launch logs, shell
+  history naming the project, and for the project's root env its own last edit or commit.
+  The newest sign is remembered across scans (`env_last_use.json`), so cleaning caches
+  does not make an env look idle on the next scan.
+- **In use** — an env is never offered when this app runs from it (run from source), a
+  Lab Hub app runs from that checkout (`lab_hub/lab_hub/apps.toml`), an installed bundle in
+  `/Applications` names it or its checkout (`project_root.txt` or its launcher), a running
+  process has a path inside it (`ps` and `lsof`), or a launchd job names it.
+- **Duplicates** — envs built from the same lockfile/manifest, or from the same
+  `requirements.txt` package list with other pins, are listed together in the tooltip,
+  and the least recently used copy that is offered is marked as the one to remove.
+- Nothing is ticked by default. **☑ Select all safe** ticks every project's caches only
+  (click again to clear); each env needs its own tick. A ticked box turns its size and the
+  project name **red** and the card shows "Will delete: N MB in M folders"; grey = stays
+  (locked or linked).
+- **🧹 Clean up checked** — acts on the ticked boxes after a confirmation dialog that lists
+  each env with its last use and rebuild cost, then the cache folders. Before an env goes
+  to the Trash a **rebuild record** is written to `env_records/` (rebuild command, Python
+  version, and an exact `pip freeze` for Python envs); no record, no trash: if it cannot be
+  saved the env is left in place. Never touched: source code, git history, uncommitted
+  changes, `.env` files. The tick boxes are not row selection. Symlinked or out-of-tree
+  projects (marked ↗, e.g. `altmerch_store`, `syndustryx`) are never cleaned from here
+  (greyed). Every deleted path must lie inside its own project.
+- **♻ Rebuild missing envs…** — recreates every env whose record says it is gone (or whose
+  last rebuild failed) in a background worker: exact versions from the recorded freeze
+  where there is one, otherwise the project's rebuild command. Reports ✓/✗ per env and
+  never deletes anything; a failed attempt is kept and retried over next time.
 - **🔄 Rescan** — refreshes the table (also runs at launch and on Refresh all)
-- **✅ Commit selected…** — enabled only while exactly one project with uncommitted
-  changes is selected (the button then reads *Commit <name>…* and the dialog names
-  the project and path). It stages that project's changes, scans them with gitleaks (a hit unstages everything and commits nothing) and commits with the message
-  you confirm. Orange "N uncommitted" means unprotected work, since autosync is push-only.
-- **Right-click any row** → Open in Finder / Terminal; on a dirty repo also Commit changes
-  and Show changes in Terminal; on a project with a manifest warning, *Don't warn about
-  missing manifest* (kept in `lab_health_ignore.json` beside `state.json`).
+- **✅ Commit selected…** — commits every selected project with uncommitted changes (the
+  button reads *Commit <name>…* or *Commit N projects…*). **Select all with uncommitted
+  changes (N)** selects them all, linked projects included. Each project is staged,
+  scanned with gitleaks (a hit unstages everything and commits nothing) and committed.
+  For one project you confirm the message (default `<project>: checkpoint YYYY-MM-DD`);
+  several are each committed with that default. Orange "N uncommitted" means unprotected
+  work, since autosync is push-only.
+- **Commit warnings** — the Git cell shows ⚠ (details in its tooltip) when committing
+  everything could do harm: a merge, rebase or cherry-pick in progress, a detached HEAD,
+  more than 200 files, 10+ deleted tracked files, secret- or key-like files (`.env*`,
+  `*.pem`, `id_rsa`, …), generated folders that are not git-ignored (`node_modules`,
+  `.venv`, `__pycache__`, …), a nested git repo, or files over 5 MB. A linked project (↗)
+  always gets a linked-project warning, since another session may be working there. A
+  warned project needs **Commit anyway?**; with several selected, **Commit only without
+  warnings** leaves the warned ones out. This is advice, not a gate: gitleaks still runs.
+- **🗂 Other caches…** — measures well-known tool caches outside `lab/active` (pip, uv,
+  Homebrew, npm, pnpm, Yarn, Xcode DerivedData, unavailable simulators, Hugging Face and
+  PyTorch models, Docker), largest first. Tick and **🧹 Clean checked** runs each tool's own
+  cleanup (`pip cache purge`, `uv cache clean`, `brew cleanup --prune=all`, …), or empties
+  the folder when the tool is missing, after a confirmation. Simulators and model caches
+  start unticked; Docker is report-only. Anything outside your home folder, or a symlink,
+  is refused.
+- **Right-click any row** → Open in Finder / Terminal, **Show largest folders…** (the ten
+  biggest folders over 1 MB up to two levels deep, so a big `.git` or data folder stands
+  out); on a dirty repo also Commit changes and Show changes in Terminal; on a project
+  with a manifest warning, *Don't warn about missing manifest* (kept in
+  `lab_health_ignore.json` beside `state.json`).
 - The manifest warning appears only for projects with Python code (looked for up to three
   levels down, skipping venvs and builds) and no `requirements.txt` / `pyproject.toml` /
   `setup.py` / `Pipfile` anywhere in that tree. Symlinked projects (`altmerch_store`,
@@ -161,11 +211,14 @@ do, the columns fit the window by themselves; once you have, your widths stay pu
 through refreshes and relaunches (kept in `state.json`). Right-click the header →
 **Fit columns to window** to go back to automatic.
 
-Rebuild a cleaned venv with `uv sync` or `pip install -r requirements.txt`.
+Rebuild a trashed env with **♻ Rebuild missing envs…**, or by hand with its rebuild
+command (`uv sync`, `pip install -r requirements.txt`, `npm ci`, …).
 
 The card's rules (manifest check, ignore list, linked-project detection, git label,
-cleanup targets, commit target, and the gitleaks-gated commit) live in `lab_health.py`,
-which imports no Qt, so `tests/test_lab_health.py` checks them without a window.
+cleanup targets, commit targets and warnings, env use detection and last-use memory,
+rebuild records, thresholds, largest folders, other caches, and the gitleaks-gated
+commit) live in `lab_health.py`, which imports no Qt, so `tests/test_lab_health.py`
+checks them without a window.
 
 ---
 
@@ -367,6 +420,10 @@ All persistent data lives in:
 | `tokens.json` | Per-account OAuth refresh tokens |
 | `manual_accounts.json` | Accounts added via + Add account |
 | `state.json` | Notification cooldown timestamp, settings preferences |
+| `lab_health_ignore.json` | Projects whose missing-manifest warning is silenced |
+| `lab_health_settings.json` | Lab Health thresholds (`env_idle_days`, `project_idle_days`) |
+| `env_last_use.json` | Newest sign of use per env, remembered across Lab Health scans |
+| `env_records/` | One rebuild record per env Lab Health moved to the Trash |
 
 This location survives `.app` rebuilds. Nothing is stored inside the bundle.
 
@@ -486,7 +543,8 @@ ships a fixed cocoa plugin.
 
 ## Background threads
 Every background `QThread` (folder and Lab Health scans, the iCloud size scan, OAuth
-connects, the failure webhook) starts through `start_thread()` in `main.py`, never a bare
+connects, the failure webhook, and the `CallWorker` jobs behind Other caches, Show largest
+folders and Rebuild missing envs) starts through `start_thread()` in `main.py`, never a bare
 `.start()`. A module-level keeper holds each thread from start until it emits `finished`.
 Without it, Qt aborts the whole app ("QThread: Destroyed while thread is still running")
 whenever the last reference goes while the thread runs: a storage tile deleted by a refresh
@@ -497,6 +555,24 @@ is still running, and disconnects the old scan's result so it cannot overwrite t
 Call `start_thread()` from the GUI thread only: the release runs on the thread that
 connected it, so a thread started elsewhere would never be released (a leak, not a crash).
 Never use `QThread.terminate()`. Reviewed in `docs/audit/qthread-lifetime-review.md`.
+
+## Layout
+
+| Path | What it is |
+|---|---|
+| `main.py` | The whole GUI: sidebar window and Overview page, cards, menu-bar icon, Settings, scheduling, `--run-backup` / `--background` |
+| `lab_health.py` | Qt-free Lab Health rules: cleanup, env use detection, rebuild records, commit warnings, thresholds, other caches |
+| `cloud_quota.py` | Google Drive / Dropbox OAuth and quota, manual accounts, the app-support folder (`SECRETS_DIR`) |
+| `verify.py` | Backup spot-check library (not wired into the app yet) |
+| `appkit_guard.py` | macOS 27 `clickCount` guard, copied from Lab Hub |
+| `version.py`, `VERSION` | `v<MAJOR>.<BUILD>` version string; `VERSION` holds MAJOR |
+| `scripts/stamp_version.py` | Writes `_build_info.json` for a frozen build (git-ignored output) |
+| `build_app.sh` | PyInstaller build and install to `/Applications`; the `*.spec` files are its git-ignored by-products |
+| `assets/` | App icon sources and `icon.icns` |
+| `tests/` | pytest suite (see *Tests*); `pytest.ini` points pytest at it |
+| `requirements.txt` | Runtime dependencies (PySide6, requests) |
+| `docs/` | Specs, audits, playbooks and app context for the agent process (see *How changes are made*) |
+| `README.md`, `TODO.md`, `SUGGESTIONS.md`, `AGENTS.md` | This guide (also the in-app App guide), backlog, ideas, and the engineering process |
 
 ## Tests
 
@@ -515,7 +591,8 @@ because the failure it guards against is SIGABRT and would otherwise take pytest
 `tests/test_replace_worker.py` covers a superseded scan being kept alive with its result
 dropped.
 
-The rest: `test_lab_health.py` (Lab Health rules in `lab_health.py`),
+The rest: `test_lab_health.py` (Lab Health rules in `lab_health.py`, plus a few card
+checks: selection, ticking, tooltips),
 `test_login_agent.py` (Open at login LaunchAgent), `test_tile_windows.py` (tiles never
 escape as windows), `test_resizable_columns.py`, `test_scroll_latching.py`,
 `test_time_machine.py` (`tmutil` parsing), `test_wake_schedule.py` (`pmset` parsing) and
