@@ -8,10 +8,12 @@ missing. Standard library only, Python 3.9+, never fails a session: any error ex
 
     python3 docs/foundry/tooling/session_start.py            # as a hook (JSON on stdin)
     python3 docs/foundry/tooling/session_start.py --cwd DIR  # by hand
+    python3 docs/foundry/tooling/session_start.py --inflight # work another session may own
 """
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import time
@@ -27,6 +29,60 @@ def app_root(start: Path):
         if (d / "docs" / "foundry" / "app-context.md").is_file() or (d / ".git").exists():
             return d
     return None
+
+
+def _git(root: Path, *args: str) -> str:
+    try:
+        r = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, timeout=5)
+        return r.stdout if r.returncode == 0 else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def inflight(root: Path) -> list:
+    """Work another session may own: unreleased specs, unmerged claude/* branches, other worktrees."""
+    out = []
+    latest = {}                                     # spec -> (phase, state, ts) of its newest event
+    try:
+        for ln in (root / "docs" / "foundry" / "activity.jsonl").read_text(encoding="utf-8").splitlines():
+            try:
+                r = json.loads(ln)
+            except ValueError:
+                continue
+            if isinstance(r, dict) and r.get("spec"):
+                latest[r["spec"]] = (r.get("phase", "?"), r.get("state", r.get("event", "")), str(r.get("ts", r.get("at", "")))[:10])
+    except OSError:
+        pass
+    specs = [("%s (%s %s %s)" % (s, p, st, ts)).replace("  ", " ") for s, (p, st, ts) in sorted(latest.items())
+             if not (p == "release" and st == "done")]
+    if specs:
+        out.append("specs not released: " + ", ".join(specs))
+    base = ""
+    for cand in ("main", "master"):
+        if _git(root, "rev-parse", "--verify", "-q", cand).strip():
+            base = cand
+            break
+    if base:
+        names = [b.strip().lstrip("*+ ") for b in _git(root, "branch", "--list", "claude/*", "--no-merged", base).splitlines() if b.strip()]
+        ahead = []
+        for b in names:
+            n = _git(root, "rev-list", "--count", "%s..%s" % (base, b)).strip()
+            ahead.append("%s (+%s)" % (b, n or "?"))
+        if ahead:
+            out.append("unmerged branches: " + ", ".join(ahead))
+    wts = [ln[9:] for ln in _git(root, "worktree", "list", "--porcelain").splitlines() if ln.startswith("worktree ")]
+    others = [w for w in wts if Path(w).resolve() != root.resolve()]
+    if others:
+        out.append("other worktrees: " + ", ".join(others))
+    return out
+
+
+def inflight_line(root: Path) -> str:
+    items = inflight(root)
+    if not items:
+        return ""
+    return ("IN FLIGHT: " + "; ".join(items) + ". Before starting a change, check it is not one of these; "
+            "if it is, stop and tell the owner. A session started by another session starts no further sessions.")
 
 
 def report(root: Path) -> str:
@@ -74,7 +130,8 @@ def report(root: Path) -> str:
             "this session's work belongs to." % (root.name, tier or "UNSET", last))
     if warn:
         line += "\nFOUNDRY WARNINGS: " + "; ".join(warn) + ". Tell the owner before building."
-    return line
+    flight = inflight_line(root)
+    return line + ("\n" + flight if flight else "")
 
 
 def main() -> int:
@@ -83,14 +140,14 @@ def main() -> int:
         if "--cwd" in sys.argv:
             cwd = sys.argv[sys.argv.index("--cwd") + 1]
         else:
-            if not sys.stdin.isatty():
+            if "--inflight" not in sys.argv and not sys.stdin.isatty():
                 raw = sys.stdin.read()
                 data = json.loads(raw) if raw.strip() else {}
             cwd = data.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
-        if data.get("source") == "resume":
+        if "--inflight" not in sys.argv and data.get("source") == "resume":
             return 0                                # the line is already in the resumed context
         sid = re.sub(r"[^A-Za-z0-9_-]", "", str(data.get("session_id", "")))
-        if sid:                                     # registered twice (app and user settings): print once
+        if sid and "--inflight" not in sys.argv:                                     # registered twice (app and user settings): print once
             stamp = Path(tempfile.gettempdir()) / ("foundry-session-%s-%s" % (sid, data.get("source", "")))
             try:
                 if stamp.exists() and time.time() - stamp.stat().st_mtime < 30:
@@ -99,6 +156,10 @@ def main() -> int:
             except OSError:
                 pass
         root = app_root(Path(cwd).expanduser().resolve())
+        if "--inflight" in sys.argv:
+            items = inflight(root) if root else []
+            print("\n".join(items) if items else "nothing in flight")
+            return 0
         out = report(root) if root else ""
         if out:
             print(out)

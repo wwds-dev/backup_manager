@@ -9,6 +9,14 @@ above this repo still apply.
 say which phase this session's work belongs to. **Before starting a phase,** read that phase's
 part of `docs/foundry/PROCESS.md`, the full reference. Do not load it whole for a small task.
 
+## One session owns a spec
+Before Define or Build for a change, run `python3 docs/foundry/tooling/session_start.py --inflight`
+(the session-start line shows it too). It lists specs not yet released, unmerged `claude/*`
+branches and other worktrees. If one matches your change, stop and tell the owner; do not build.
+Otherwise name the spec slug as yours. A session started by another session starts no further
+sessions: it proposes them to the owner. No session exists only to relay another's status; read
+the files or ask the owner.
+
 ## Owner
 The owner is the CEO and the only approver. Agents advise, build and review; they do not approve
 their own work. A **legal sign-off** (owner or a lawyer) and a **tax sign-off** (owner or an

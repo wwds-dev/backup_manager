@@ -36,6 +36,11 @@ Rules for you, the orchestrator:
    - Record a client's acceptance only when the owner tells you the client accepted, quoting
      them: `order.py accept <id> spec --spec <slug> --who "<name>" --on <date> --how email
      --ref "<subject, date>" --owner-words "<owner's words>"`. Never from silence.
+0e. **Work in flight.** Run `python3 docs/foundry/tooling/session_start.py --inflight`. If a listed
+   spec, `claude/*` branch or worktree matches this change (an existing `docs/specs/<slug>.md`, a
+   `build start` without `release done` in `docs/foundry/activity.jsonl`), stop and tell the owner
+   instead of building. If none does, state the spec slug this session owns. Do not start other
+   sessions yourself if another session started you: propose them to the owner.
 1. Delegate each phase to its agent (Agent tool, `subagent_type` = the agent's name). Brief
    each with the goal, the spec path and what earlier phases decided; they have no context.
 1a. **Record what the owner approves.** Each time the owner says yes at a gate (Case, Define,
