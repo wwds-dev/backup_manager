@@ -10,6 +10,8 @@ dist/
 assets/icon.iconset/
 .claude/*
 !.claude/settings.json
+!.claude/agents/
+!.claude/commands/
 
 # Build metadata, written by scripts/stamp_version.py on every build.
 # Output, not source: a checkout reads live git instead.
