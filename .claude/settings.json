@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(*legal_gate.py sign*)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$CLAUDE_PROJECT_DIR/docs/foundry/tooling/session_start.py\""
+          }
+        ]
+      }
+    ]
+  }
+}
