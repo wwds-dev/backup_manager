@@ -48,6 +48,26 @@ free._
 - **Local fails closed.** When the local server is off, the work waits or the owner chooses a
   cloud model; `local_model.py` never falls back by itself, and client or personal data never
   falls back at all.
+- **Which local model, if any: ask the advisor** (Foundry HQ: `tools/local_advise.py`, rules in
+  `tools/local_rules.toml`, this machine in the private `local_profile.toml` from
+  `tools/local_profile.py`). Verdicts: Recommended, Possible with notes or Not recommended, each with
+  reasons from a fixed rule table: model + KV cache must fit the memory the GPU may use; speed is
+  about bandwidth / bytes read per token until a 30-second benchmark measures it; the kind of work
+  sets the smallest acceptable model, quantisation and context; work no rule names stays on a cloud
+  model. The workspace shows the verdict next to each `@local` item.
+- **Uncensored and abliterated models** get no quality bonus, rank below an equal plain model and
+  carry a warning; they are never used for gate-like work. No routing exists to get round a
+  model's safeguards. When a cloud model over-refuses code for the owner's own security tooling,
+  the owner may tag that one TODO line `local:owner-ok`. That allows a local draft; the security
+  review still runs as usual. No tool sets the tag.
+- **Overnight queue** (HQ: `tools/local_queue.py`). It drafts the Recommended `@local` items in one
+  batch through `local_model.py`. Drafts go to the HQ's private `local-drafts/<date>/`, never into
+  an app or onto main, and `MORNING.md` is the review list. Each draft gets an automatic local
+  check. A Haiku screen is opt-in and never runs for `client` apps. The owner's `mark` is recorded
+  in `local_quality.jsonl`, and the advisor uses that record to learn which kinds of work local
+  handles well. The steps are in `docs/local-models-guide.md`.
+- **Cost saved** is shown against the cloud fallback for local work (`[cost]` in the rule table)
+  at the list price in `dashboard/model_prices.json`. With no price it says "not recorded".
 - **Count everything.** Local calls are counted at zero cost in `docs/foundry/model_use.jsonl`;
   paid eval runs are counted with their cost against the plan's `eval_budget_usd`; agent sessions
   are measured from Claude Code's transcripts by the Foundry workspace.
@@ -59,7 +79,10 @@ The model and pricing pages of every provider the studio or an app uses (Anthrop
 Google, ElevenLabs, ...); LM Studio's release notes and docs (endpoints, defaults, auth); public
 benchmark and arena leaderboards per kind of work (as a prompt, not a verdict); provider data-use
 and retention terms for API traffic. _The radar source row for this playbook is not added yet:
-left for the radar session's owner review (Foundry TODO)._
+left for the radar session's owner review (Foundry TODO)._ The local-model rule table has its own
+row ("local models" in `radar/sources.md`).
 
 ## Change log
 - 2026-11-11: seeded (baseline) with Foundry v9.
+- 2026-11-17: local-model advisor, profile, overnight queue, quality record and cost-saved line
+  (Foundry v12, owner-approved plan). The rule table carries its own review date.
