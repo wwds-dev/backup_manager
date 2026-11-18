@@ -288,3 +288,39 @@ removal. Added 10 tests for exactly those; all of those mutants are now killed. 
 Not covered: the dialog's remove flow in `main.py` (display only is tested), two minor
 `lab_health.in_foreign_tree` mutants (backslash normalisation, ValueError return), and no real
 removal has been run on the lab. The QA agent has not re-run on the new tests.
+
+## 14. Define: slice 2 (Archive, Backups, Caches), 2026-11-18, awaiting the Define gate
+Owner answers (2026-11-18): backup age **30 days**; a README tree line or history note does **not**
+block a snapshot (listed in the tooltip); an unreferenced snapshot gets **no** earlier rule; Drive
+`_deleted/` stays **manual** (report-only line plus a suggested prune command); weekly scan **on,
+report-only, never deletes**. Not asked, proposed: worktree age becomes a setting (default 14, range 7-60).
+
+**Re-measured 2026-11-18** (`du -sk`, mtime ages, read-only): `archive/fixes_2026-10-12` 143 MB
+(slice 1 removed `provisio-deps`; its restore record exists); of its 4 registered worktrees none is
+offered (sentinel unmerged; imprint has ignored `data`; two provisio lack a manifest for `node_modules`).
+So Archive adds almost nothing for git members: slice 1 already covers them. `backups/`: 7 snapshots,
+332 MB; 5 over 30 days (`pre_backstage_split` 51 d 45 MB, `pre_headroom_merge` 49 d 117 MB,
+`pre_identity_rewrite_0924` 55 d 20 MB, `pre_identity_rewrite_1009` 40 d 25 MB, `sonar-app-prev` 37 d
+98 MB). Non-history docs naming them: `sonar-app-prev`, `sonar-data` (sonar audit/spec, block);
+`pre_identity_rewrite_1009` named nowhere. Lab README tree names three others (does not block).
+Root `__pycache__` 188 KB. `runners/` 878 MB, unknown purpose, stays manual. Drive `_deleted/`: not measured.
+
+**Scope of slice 2** (all offered only by tick + confirm; nothing pre-ticked):
+1. **Archive:** list every `archive/*` entry with size and age (new: `archive/artifacts` 9.4 MB,
+   `autopilot-2026-11-17` 7.9 MB). Git members are shown with their slice-1 verdict (no second removal
+   path). Non-git folders are **report-only**, never offered.
+2. **Backups:** offered when older than 30 d and no non-history doc (not README tree lines, not
+   `docs/history/**`, not `lab-notes-*`) names it, searched in lab `AGENTS.md`, `docs/`, each project's
+   `AGENTS.md`, `TODO.md`, `docs/` (a real search, not a glob). Move to the **Trash** (never `rmtree`),
+   restore record first ("no record, no trash"). Today's result would be: 4 offered (about 207 MB:
+   `pre_backstage_split`, `pre_headroom_merge`, `pre_identity_rewrite` x2), `sonar-app-prev` blocked, rest too young.
+3. **Caches outside `active/`:** same cache names as Lab Health, lab root and top-level scratch folders,
+   skipping `.claude` and worktrees; permanent delete as today.
+4. **Report-only:** Drive `_deleted/` line (only if the owner enables it) and `runners/`/`~/Documents`
+   items from section 5; weekly report-only scan writes `workspace_report.json`.
+5. Worktree age setting (default 14) wired to slice 1's gate.
+
+Not in scope: `folder_audit.py` duplication, `lab_health.py:62` hardening, readiness-audit findings,
+dashboards consolidation. Success measure: section 7 tests per gate, mutation-checked, plus a read-only
+real dry run showing the 4 backups offered, `sonar-*` blocked, and one real Trash entry with its record.
+Next: Define gate (owner), then Architect gate (new Trash and scan-schedule boundaries), Build, Review, Secure, Verify.
