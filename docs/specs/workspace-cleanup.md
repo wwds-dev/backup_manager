@@ -399,3 +399,11 @@ Still untested: branch coverage (no `pytest-cov` in the venv), the real `QFile.m
 entry, the in-app QTimer firing, two weekly scans overlapping. Not done: install, release, merge.
 Release needs a fresh `legal_gate.py check`: run from this worktree it says "no legal pack: docs/legal/register.md
 is missing" (docs/legal is git-ignored and lives only in the main checkout); it must be run there. In the main checkout it says "clear" today (before this branch is merged); it must be re-run after the merge.
+
+## 19. Release log (slice 2)
+
+2026-11-18: v2.119 merged (`16097f5`), built and installed. Real-removal check by the owner in the installed app:
+`backups/pre_backstage_split_20260927-232944` ticked in 🗂 Workspace… and cleaned. The dialog said "moved to the Trash
+(Put Back to restore)"; the folder is gone from `lab/backups/` (6 left) and a mode-600 record
+`backup_records/pre_backstage_split_20260927-232944__1795038624.json` was written first. This closes the
+"real `QFile.moveToTrash`" gap listed in section 18. Still not verified: the QTimer firing in the live app.
