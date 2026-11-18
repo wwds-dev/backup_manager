@@ -398,4 +398,4 @@ ignore-ticks, kept-backup-gets-a-box, birth, cache-root and record-overwrite mut
 Still untested: branch coverage (no `pytest-cov` in the venv), the real `QFile.moveToTrash` and a real Trash
 entry, the in-app QTimer firing, two weekly scans overlapping. Not done: install, release, merge.
 Release needs a fresh `legal_gate.py check`: run from this worktree it says "no legal pack: docs/legal/register.md
-is missing" (docs/legal is git-ignored and lives only in the main checkout); it must be run there.
+is missing" (docs/legal is git-ignored and lives only in the main checkout); it must be run there. In the main checkout it says "clear" today (before this branch is merged); it must be re-run after the merge.
