@@ -26,6 +26,7 @@ import urllib.request
 
 import appkit_guard
 import lab_health
+import workspace
 import version
 from datetime import datetime
 from pathlib import Path
@@ -1435,6 +1436,9 @@ class LabHealthWorker(QThread):
         if rc != 0:
             return []
         found = [Path(p) for p in out.splitlines() if p.strip()]
+        # Another agent's worktree (`.claude/worktrees/*`, a linked worktree) is not this
+        # project's clutter, and is never listed or cleaned from here.
+        found = [d for d in found if not lab_health.in_foreign_tree(proj, d)]
         # Never offer tracked folders (a committed build/ or dist/): deleting
         # them would show up as changes in the repo. In a git repo keep only
         # git-ignored ones; without git, only names that are never source.
@@ -3074,6 +3078,14 @@ class LabHealthCard(Card):
         rebuild.clicked.connect(self.rebuild_missing)
         self.rebuild_btn = rebuild
         row.addWidget(rebuild)
+        wtbtn = secondary_button("🌿 Worktrees…")
+        wtbtn.setToolTip("Git worktrees under the lab (agent worktrees, archive checkouts). A "
+                         "worktree is offered only when it is clean, merged or pushed, untouched "
+                         f"for {workspace.MIN_AGE_DAYS} days, with nothing running in it and no "
+                         "ignored files that are not caches. Nothing is ticked; the branch is kept.")
+        wtbtn.clicked.connect(self.show_worktrees)
+        self.worktrees_btn = wtbtn
+        row.addWidget(wtbtn)
         row.addStretch()
         self.body(row)
 
@@ -3215,6 +3227,122 @@ class LabHealthCard(Card):
             worker.done.connect(finished)
             self._syscache_clean_worker = replace_worker(
                 getattr(self, "_syscache_clean_worker", None), worker)
+
+        go.clicked.connect(run)
+        dlg.exec()
+
+    def show_worktrees(self):
+        self.worktrees_btn.setEnabled(False)
+        self.worktrees_btn.setText("🌿 Scanning…")
+        root = LAB_ACTIVE.parent
+        worker = CallWorker(lambda: workspace.scan_worktrees(root))
+        worker.done.connect(self._worktrees_ready)
+        self._worktrees_worker = replace_worker(getattr(self, "_worktrees_worker", None), worker)
+
+    def _worktrees_ready(self, rows):
+        self.worktrees_btn.setEnabled(True)
+        self.worktrees_btn.setText("🌿 Worktrees…")
+        if rows is None:
+            QMessageBox.warning(self, "Worktrees", "The scan failed.")
+            return
+        if not rows:
+            QMessageBox.information(self, "Worktrees", "No linked worktrees under the lab.")
+            return
+        root = LAB_ACTIVE.parent
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Worktrees")
+        dlg.resize(760, 560)
+        lay = QVBoxLayout(dlg)
+        head = QLabel(
+            "Offered: clean, merged or pushed, untouched for "
+            f"{workspace.MIN_AGE_DAYS}+ days, nothing running inside, no ignored files that "
+            "are not caches. Removing one runs `git worktree remove` (never forced) after "
+            "saving a restore record; the branch stays. Everything else is kept, with the "
+            "reason. Nothing is ticked.")
+        head.setWordWrap(True)
+        lay.addWidget(head)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        inner = QWidget()
+        il = QVBoxLayout(inner)
+        boxes = []
+        for r in rows:
+            label = f"{human_size(r['kb'] * 1024)}  {r['rel']}  [{r['branch'] or 'detached'}]"
+            if r["eligible"]:
+                cb = QCheckBox(label)
+                cb.setToolTip(f"{r['path']}\nrepo: {r['repo']}")
+                il.addWidget(cb)
+                boxes.append((cb, r))
+            else:
+                lbl = QLabel(f"\u2022 {label}")
+                lbl.setTextFormat(Qt.PlainText)   # names come from other agents' repos
+                lbl.setToolTip(str(r["path"]))
+                il.addWidget(lbl)
+                why = QLabel("      kept: " + "; ".join(r["reasons"]))
+                why.setObjectName("CardSubtitle")
+                why.setTextFormat(Qt.PlainText)
+                why.setWordWrap(True)
+                il.addWidget(why)
+        il.addStretch()
+        scroll.setWidget(inner)
+        lay.addWidget(scroll, 1)
+        if not boxes:
+            lay.addWidget(QLabel("Nothing is offered right now."))
+        status = QLabel("")
+        status.setTextFormat(Qt.PlainText)
+        status.setWordWrap(True)
+        lay.addWidget(status)
+        brow = QHBoxLayout()
+        go = QPushButton("🧹 Remove checked")
+        go.setEnabled(bool(boxes))
+        close = QPushButton("Close")
+        brow.addStretch()
+        brow.addWidget(go)
+        brow.addWidget(close)
+        lay.addLayout(brow)
+        close.clicked.connect(dlg.accept)
+
+        def run():
+            todo = [r for cb, r in boxes if cb.isChecked() and cb.isEnabled()]
+            if not todo:
+                status.setText("Nothing ticked.")
+                return
+            text = "\n".join(f"  {r['rel']}  ({human_size(r['kb'] * 1024)})" for r in todo[:12])
+            if len(todo) > 12:
+                text += f"\n  \u2026 and {len(todo) - 12} more"
+            box = QMessageBox(
+                QMessageBox.Question, "Remove worktrees",
+                f"Remove {len(todo)} worktrees "
+                f"({human_size(sum(r['kb'] for r in todo) * 1024)})?\n{text}\n\n"
+                "Each is re-checked first and removed with `git worktree remove` "
+                "(never forced). A restore record is saved; the branch is kept.",
+                QMessageBox.Yes | QMessageBox.Cancel, dlg)
+            box.setTextFormat(Qt.PlainText)   # folder names are not markup
+            box.setDefaultButton(QMessageBox.Cancel)
+            if box.exec() != QMessageBox.Yes:
+                return
+            go.setEnabled(False)
+            status.setText("Removing\u2026")
+
+            def work():
+                return [(r, *workspace.remove_worktree(r, root)) for r in todo]
+
+            def finished(results):
+                go.setEnabled(True)
+                if results is None:
+                    status.setText("Removing failed unexpectedly.")
+                    return
+                mark = {True: "\u2713", False: "\u2717"}
+                status.setText("\n".join(f"{mark[ok]} {r['rel']}: {msg}" for r, ok, msg in results))
+                for cb, r in boxes:
+                    if any(r is x[0] and x[1] for x in results):
+                        cb.setChecked(False)
+                        cb.setEnabled(False)
+
+            worker = CallWorker(work)
+            worker.done.connect(finished)
+            self._worktrees_clean_worker = replace_worker(
+                getattr(self, "_worktrees_clean_worker", None), worker)
 
         go.clicked.connect(run)
         dlg.exec()

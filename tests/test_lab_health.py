@@ -696,3 +696,56 @@ def test_docker_is_report_only_and_risky_ones_unticked(tmp_path):
     assert by["Docker data"]["auto"] is False
     assert by["Hugging Face models"]["default"] is False
     assert by["uv"]["default"] is True
+
+
+# --- other agents' worktrees are never this project's clutter -----------------
+
+def _worktree(proj, rel, kind="worktree"):
+    """A dir whose `.git` file points where a linked worktree (or a submodule) points."""
+    d = proj / rel
+    d.mkdir(parents=True)
+    target = "worktrees/x" if kind == "worktree" else "modules/x"
+    (d / ".git").write_text(f"gitdir: /repo/.git/{target}\n")
+    return d
+
+
+def test_in_foreign_tree_flags_claude_dir_and_linked_worktrees(tmp_path):
+    proj = tmp_path / "p"
+    wt = _worktree(proj, ".claude/worktrees/a")
+    (wt / "node_modules").mkdir()
+    sibling = _worktree(proj, "imprint-wt", "worktree")
+    (sibling / ".venv").mkdir()
+    sub = _worktree(proj, "vendor/bug_spray", "submodule")   # a submodule is part of the project
+    (sub / "__pycache__").mkdir()
+    own = proj / "__pycache__"; own.mkdir()
+    claude_cache = proj / ".claude" / "__pycache__"; claude_cache.mkdir(parents=True)
+    assert lh.in_foreign_tree(proj, wt / "node_modules")
+    assert lh.in_foreign_tree(proj, sibling / ".venv")
+    assert lh.in_foreign_tree(proj, claude_cache)
+    assert not lh.in_foreign_tree(proj, sub / "__pycache__")
+    assert not lh.in_foreign_tree(proj, own)
+    assert not lh.in_foreign_tree(proj, proj / ".venv")
+
+
+def test_cleanup_targets_never_return_worktree_contents(tmp_path):
+    proj = tmp_path / "p"; (proj / ".venv").mkdir(parents=True)
+    wt = _worktree(proj, ".claude/worktrees/a")
+    (wt / "node_modules").mkdir(); (wt / "__pycache__").mkdir()
+    rows = [_row("p", path=str(proj), items=[
+        _item(proj / ".venv"),
+        _item(wt / "node_modules"),
+        _item(wt / "__pycache__", kind="junk", rebuild=None)])]
+    got = lh.cleanup_targets(rows, {0}, {0})
+    assert [t["path"] for t in got] == [proj / ".venv"]
+
+
+def test_a_linked_worktree_named_like_a_cache_is_never_cleaned(tmp_path):
+    proj = tmp_path / "p"
+    _git(tmp_path, "init", "-b", "main", str(proj))
+    (proj / "a").write_text("a"); _git(proj, "add", "a")
+    subprocess.run(["git", "-C", str(proj), "-c", "user.name=t", "-c", "user.email=t@t",
+                    "commit", "-m", "x"], check=True, capture_output=True)
+    _git(proj, "worktree", "add", "--detach", str(proj / "dist"))   # a worktree called `dist`
+    assert lh.in_foreign_tree(proj, proj / "dist")
+    rows = [_row("p", path=str(proj), items=[_item(proj / "dist", kind="env")])]
+    assert lh.cleanup_targets(rows, {0}, {0}) == []
