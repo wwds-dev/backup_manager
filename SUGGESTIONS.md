@@ -14,6 +14,7 @@ Status: `IDEA` · `CONSIDERING` · `PLANNED` · `DONE` · `REJECTED`
 | 7 | Power Nap backup via an `SMAppService` helper daemon | research | L | IDEA |
 | 8 | macOS Shortcuts action that triggers `--run-backup` | feature | M | IDEA |
 | 9 | Focus-mode notification filter, so overdue alerts stay quiet during Do Not Disturb | feature | M | IDEA |
+| 10 | One safety app with git_autosync and Lab Hub's Land (git_autosync #8): Lab Health's commit and worktree cleanup overlaps both, so sync, backup and repo hygiene get one owner and one menu-bar icon (portfolio review 2026-11-18) | design | XL | IDEA |
 
 ## Done
 
