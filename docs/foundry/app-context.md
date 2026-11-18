@@ -15,7 +15,7 @@ the same day from the evidence below; raising it later goes through Comply first
 Evidence: the repo `wwds-dev/backup_manager` is public (checked 2026-11-11); it has no
 `LICENSE`, no GitHub release, no download page and no store listing. Nobody pays and it takes no
 payment. Personal data: the owner's own backup folder list and Google Drive / Dropbox OAuth
-tokens (Keychain), nobody else's. `public` is proposed only because the source is published; if
+tokens (a mode-0600 file in Application Support, not the Keychain; corrected 2026-11-18), nobody else's. `public` is proposed only because the source is published; if
 nobody else is meant to use it, making the repo private and setting `internal` removes the
 LICENSE, privacy note, name check and sign-off.
 

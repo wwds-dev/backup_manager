@@ -646,3 +646,7 @@ exactly the moment someone is asking.
 This is the lab-wide scheme, shared with `imprint`, `sonar` and `lab_hub`, and
 the Lab Project Monitor computes the same string from the same two inputs, so
 the dashboard and the running app cannot disagree.
+
+## Licence
+
+MIT, see `LICENSE`. The licence does not grant any right to the name "Backup Control Center" as a trademark. Third-party libraries keep their own licences (PySide6/Qt is LGPL-3.0).
