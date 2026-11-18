@@ -260,3 +260,104 @@ def test_worktree_list_asks_git_for_nul_separated_output(lab):
     ws.list_worktrees(root, runner=spy)
     assert any("worktree" in c and "list" in c and "-z" in c for c in seen)
     assert all("core.hooksPath=/dev/null" in c for c in seen)
+
+
+# --- gaps the independent QA pass found --------------------------------------------
+
+def _spy_runner(fail_remove=False):
+    calls = []
+    real = subprocess.run
+
+    def run(cmd, *a, **k):
+        calls.append(list(cmd))
+        if fail_remove and "remove" in cmd:
+            return subprocess.CompletedProcess(cmd, 1, "", "fatal: contains modified or untracked files\n")
+        return real(cmd, *a, **k)
+    return run, calls
+
+
+def test_remove_never_forces_and_separates_the_path(lab, tmp_path):
+    root, repo = lab
+    wt = add_wt(repo, "plain")
+    item = scan(root)["plain"]
+    run, calls = _spy_runner()
+    ok, msg = ws.remove_worktree(item, root, cwds=[], now=LATER, out_dir=tmp_path / "rec", runner=run)
+    assert ok, msg
+    (rm,) = [c for c in calls if "remove" in c]
+    assert "--force" not in rm and "-f" not in rm
+    assert rm[rm.index("remove") + 1] == "--"          # the path can never read as an option
+    assert os.path.realpath(rm[-1]) == os.path.realpath(wt)
+    assert all("--no-optional-locks" in c for c in calls)
+
+
+def test_git_refusing_the_removal_leaves_the_worktree(lab, tmp_path):
+    root, repo = lab
+    wt = add_wt(repo, "refused")
+    item = scan(root)["refused"]
+    run, _ = _spy_runner(fail_remove=True)
+    ok, msg = ws.remove_worktree(item, root, cwds=[], now=LATER, out_dir=tmp_path / "rec", runner=run)
+    assert not ok and wt.exists() and "left in place" in msg and "modified or untracked" in msg
+
+
+def test_pushed_but_unmerged_branch_is_offered(lab, tmp_path):
+    root, repo = lab
+    bare = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "--bare", "-b", "main", str(bare)], check=True,
+                   capture_output=True, env=ENV)
+    git(repo, "remote", "add", "origin", str(bare))
+    wt = add_wt(repo, "pushed", "pushed")
+    (wt / "p.txt").write_text("p"); git(wt, "add", "p.txt"); git(wt, "commit", "-m", "p")
+    assert not scan(root)["pushed"]["eligible"]          # ahead of main, on no remote
+    git(repo, "push", "origin", "pushed")
+    git(repo, "fetch", "origin")
+    row = scan(root)["pushed"]
+    assert row["eligible"], row["reasons"]               # same commit exists on a remote
+
+
+def test_age_uses_the_newest_of_commit_time_and_file_mtime(lab):
+    root, repo = lab
+    wt = add_wt(repo, "aged")
+    head_time = float(git(wt, "log", "-1", "--format=%ct").strip())
+    for f in wt.rglob("*"):
+        if f.is_file() and ".git" not in f.parts[len(wt.parts):][:1]:
+            os.utime(f, (head_time, head_time))
+    day = 86400
+    just_under = scan(root, now=head_time + 14 * day - 60)["aged"]
+    assert not just_under["eligible"] and any("13 day" in r for r in just_under["reasons"])
+    assert scan(root, now=head_time + 14 * day)["aged"]["eligible"]   # boundary: exactly 14 days
+    os.utime(wt / "a.txt", (head_time + 20 * day, head_time + 20 * day))   # a recent edit
+    assert not scan(root, now=head_time + 21 * day)["aged"]["eligible"]
+
+
+def test_unknown_activity_blocks(lab, monkeypatch):
+    root, repo = lab
+    add_wt(repo, "unk")
+    monkeypatch.setattr(ws, "_newest_edit", lambda *a, **k: 0.0)
+    row = scan(root)["unk"]
+    assert not row["eligible"] and any("unknown" in r for r in row["reasons"])
+
+
+def test_lsof_failing_with_no_output_means_unknown(monkeypatch):
+    monkeypatch.setattr(ws.subprocess, "run",
+                        lambda *a, **k: subprocess.CompletedProcess(a[0], 1, "", ""))
+    assert ws.cwd_snapshot() is None
+
+
+def test_symlinked_or_missing_worktree_folder_is_not_offered(lab, tmp_path):
+    root, repo = lab
+    real = add_wt(repo, "real")
+    link = root / "active" / "proj" / ".claude" / "worktrees" / "link"
+    link.symlink_to(real)
+    wt = {"path": str(link), "repo": str(repo), "head": "x"}
+    assert ws.judge(wt, root, now=LATER, cwds=[]) == ["not a plain folder inside the lab root"]
+    gone = {"path": str(tmp_path / "nope"), "repo": str(repo), "head": "x"}
+    assert ws.judge(gone, root, now=LATER, cwds=[]) == ["folder is missing"]
+
+
+def test_remove_refuses_a_path_that_is_no_longer_a_worktree(lab, tmp_path):
+    root, repo = lab
+    wt = add_wt(repo, "vanished")
+    item = scan(root)["vanished"]
+    git(repo, "worktree", "remove", str(wt))
+    ok, msg = ws.remove_worktree(item, root, cwds=[], now=LATER, out_dir=tmp_path / "rec")
+    assert not ok and "no longer a worktree" in msg

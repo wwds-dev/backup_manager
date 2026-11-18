@@ -277,3 +277,14 @@ it cannot see some processes and its output is still used; (c) the symlink-swap 
 tested; (d) `lab_health.py:62` (existing code) still runs plain `git` on every project and so
 inherits repo-local fsmonitor/hooks config: separate, older exposure, proposed as its own fix;
 (e) `docs/foundry/app-context.md` Stack/Commands/Security surface are still the unfilled template.
+
+## 13. Verify log: slice 1 (2026-11-18)
+Independent qa-engineer pass on commit e77a6f0: suite 188 passed, three repeat runs of the three
+touched test files clean, real-workspace dry run as required (same 4 offered; dirty, unmerged and
+live ones kept). Verdict FAIL (conditional) on test gaps: 36+7 mutants planted, 17 survived, among them
+`--force` on `git worktree remove` (P1), the pushed-but-unmerged path (P1), the age gate boundary and
+sources, lsof non-zero exit, symlink/missing/outside-root, `--no-optional-locks`, git refusing the
+removal. Added 10 tests for exactly those; all of those mutants are now killed. Suite 196 passed.
+Not covered: the dialog's remove flow in `main.py` (display only is tested), two minor
+`lab_health.in_foreign_tree` mutants (backslash normalisation, ValueError return), and no real
+removal has been run on the lab. The QA agent has not re-run on the new tests.
