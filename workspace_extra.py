@@ -20,7 +20,7 @@ WEEKLY_DAYS = 7
 _WALK_CAP = 50000
 _FILE_CAP = 2_000_000      # bytes; larger docs are not searched (and block, see below)
 _DOC_CAP = 5000
-_DOC_SUFFIX = {".md", ".txt"}
+_DOC_SUFFIX = {".md", ".txt", ".sh", ".py", ".toml", ".json", ".yml", ".yaml", ".command"}
 _DOC_SKIP_PARTS = {"history", ".git", "node_modules", ".venv", "venv", ".claude", "archive", "backups"}
 # Never walked or cleaned for caches: other agents' trees and the dirs with their own rules.
 _NO_CACHE_ROOTS = {"active", ".claude", "archive", "backups", "worktrees", ".git", "runners",
@@ -28,25 +28,44 @@ _NO_CACHE_ROOTS = {"active", ".claude", "archive", "backups", "worktrees", ".git
 _SELF_SPEC = "workspace-cleanup.md"   # this spec lists every snapshot while describing the rule
 
 
+def _write_private(path: Path, text: str) -> None:
+    """Create with mode 600 from the start (no window where it is world-readable)."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+    os.chmod(path, 0o600)
+
+
 def clamp_days(value, lo: int, hi: int, default: int) -> int:
     try:
         v = int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return default
     return max(lo, min(hi, v))
 
 
-def _newest_mtime(folder: Path) -> float:
-    newest, seen = 0.0, 0
+def _birth(folder: Path) -> float:
+    """When the folder itself was created here (a copy made with `cp -a` keeps old mtimes)."""
     try:
-        newest = os.lstat(folder).st_mtime
+        st = os.lstat(folder)
     except OSError:
-        return 0.0
+        return time.time()
+    return max(getattr(st, "st_birthtime", 0.0), st.st_ctime)
+
+
+def _newest_mtime(folder: Path) -> float | None:
+    """Youngest sign of life: newest mtime inside, or when the folder was created here.
+    None when the folder is too big to look through (fail closed: age unknown)."""
+    try:
+        newest = max(os.lstat(folder).st_mtime, _birth(folder))
+    except OSError:
+        return None
+    seen = 0
     for dirpath, dirs, files in os.walk(folder):
         for n in dirs + files:
             seen += 1
             if seen > _WALK_CAP:
-                return newest
+                return None
             try:
                 newest = max(newest, os.lstat(os.path.join(dirpath, n)).st_mtime)
             except OSError:
@@ -76,7 +95,7 @@ def _doc_files(lab_root: Path):
             for f in files:
                 p = Path(dirpath) / f
                 if (p.suffix in _DOC_SUFFIX and not f.startswith("lab-notes-")
-                        and f != _SELF_SPEC and not p.is_symlink()):
+                        and f != _SELF_SPEC and not p.is_symlink() and p.is_file()):
                     n += 1
                     if n > _DOC_CAP:
                         raise OSError("too many docs to search")
@@ -150,10 +169,9 @@ def write_backup_record(item: dict, out_dir: Path | None = None, now: float | No
     while path.exists():
         n += 1
         path = out_dir / f"{stem}_{n}.json"
-    path.write_text(json.dumps(rec, indent=1))
+    _write_private(path, json.dumps(rec, indent=1))
     try:
         os.chmod(out_dir, 0o700)
-        os.chmod(path, 0o600)
     except OSError:
         pass
     return path
@@ -233,8 +251,9 @@ def clean_caches(paths: list[Path], lab_root: Path) -> list[tuple[Path, bool, st
             continue
         top = rel.parts[0] if rel.parts else ""
         if (p.name not in lab_health.JUNK_NAMES or p.is_symlink() or not p.is_dir()
-                or top in _NO_CACHE_ROOTS or len(rel.parts) > 2
-                or any(q.is_symlink() for q in [p.parent])):
+                or top in _NO_CACHE_ROOTS or top.startswith(".") or len(rel.parts) > 2
+                or any(q.is_symlink() for q in p.relative_to(lab_root).parents for q in [lab_root / q])
+                or any((lab_root / Path(*rel.parts[:i]) / ".git").exists() for i in range(1, len(rel.parts)))):
             res.append((p, False, "not an allowed cache folder"))
             continue
         try:
@@ -273,9 +292,5 @@ def build_report(lab_root: Path, *, min_days: int = BACKUP_MIN_DAYS, wt_days: in
 def write_report(report: dict, path: Path) -> Path:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(report, indent=1))
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
+    _write_private(path, json.dumps(report, indent=1))
     return path

@@ -1157,6 +1157,12 @@ def _save_state(data: dict) -> None:
     _STATE_FILE.write_text(json.dumps(data, indent=2))
 
 
+def _plain_tip(text) -> str:
+    """Tooltips are rich text to Qt; folder names come from other agents, so show them literally."""
+    import html
+    return "<p style='white-space:pre'>" + html.escape(str(text)) + "</p>"
+
+
 def workspace_settings() -> dict:
     """Ages and the weekly-scan switch, clamped, from state.json (Qt-free rules in workspace_extra)."""
     st = _load_state()
@@ -3297,13 +3303,13 @@ class LabHealthCard(Card):
             label = f"{human_size(r['kb'] * 1024)}  {r['rel']}  [{r['branch'] or 'detached'}]"
             if r["eligible"]:
                 cb = QCheckBox(label)
-                cb.setToolTip(f"{r['path']}\nrepo: {r['repo']}")
+                cb.setToolTip(_plain_tip(f"{r['path']}\nrepo: {r['repo']}"))
                 il.addWidget(cb)
                 boxes.append((cb, r))
             else:
                 lbl = QLabel(f"\u2022 {label}")
                 lbl.setTextFormat(Qt.PlainText)   # names come from other agents' repos
-                lbl.setToolTip(str(r["path"]))
+                lbl.setToolTip(_plain_tip(r["path"]))
                 il.addWidget(lbl)
                 why = QLabel("      kept: " + "; ".join(r["reasons"]))
                 why.setObjectName("CardSubtitle")
@@ -3475,10 +3481,11 @@ class LabHealthCard(Card):
 
         plain("Backups")
         for r in data["backups"]:
-            label = f"{human_size(r['kb'] * 1024)}  {r['rel']}  ({r['days']} d old)"
+            age = "age unknown" if r["days"] is None else f"{r['days']} d old"
+            label = f"{human_size(r['kb'] * 1024)}  {r['rel']}  ({age})"
             if r["eligible"]:
                 cb = QCheckBox(label)
-                cb.setToolTip(str(r["path"]))
+                cb.setToolTip(_plain_tip(r["path"]))
                 il.addWidget(cb)
                 boxes.append(("backup", cb, r))
             else:
@@ -3489,14 +3496,14 @@ class LabHealthCard(Card):
         plain("Cache folders outside active/")
         for r in data["caches"]:
             cb = QCheckBox(f"{human_size(r['kb'] * 1024)}  {r['rel']}")
-            cb.setToolTip(str(r["path"]))
+            cb.setToolTip(_plain_tip(r["path"]))
             il.addWidget(cb)
             boxes.append(("cache", cb, r))
         if not data["caches"]:
             plain("None found.", True)
         plain("Archive (list only; git checkouts follow the Worktrees dialog)")
         for r in data["archive"]:
-            plain(f"\u2022 {human_size(r['kb'] * 1024)}  {r['rel']}  ({r['days']} d)")
+            plain(f"\u2022 {human_size(r['kb'] * 1024)}  {r['rel']}  ({'age unknown' if r['days'] is None else str(r['days']) + ' d'})")
             for m in r["git_members"]:
                 plain("      " + m["rel"] + (": offered in Worktrees" if m["offered"]
                                               else ": kept (" + "; ".join(m["reasons"][:2]) + ")"), True)

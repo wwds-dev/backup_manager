@@ -367,3 +367,18 @@ is equivalent because the scan already rejects such paths. Real read-only dry ru
 non-history doc, so it blocks: differs from the Define estimate of 4), `sonar-data`, `agents_md_pre_consolidation`;
 caches: root `__pycache__` and `dashboards/__pycache__`. Deviation: the Overview line is a tooltip on the
 Workspace button (no Overview widget yet). Not done: independent review, Secure, Verify, install, real Trash run.
+
+## 17. Review and Secure log: slice 2 (2026-11-18)
+Independent code-reviewer and security-engineer passes on dd5b9c0 (full reports in the shared notes folder,
+`review-slice2.md`, `secure-slice2.md`). No P0. Fixed: **P1** the age gate failed open at the 50,000-entry
+walk cap (now "age unknown", kept); **P1** a snapshot copied with `cp -a` kept old mtimes and was offered
+(age is now the youngest of newest mtime and the folder's birth/ctime); P2 `clean_caches` re-checks the repo
+(`.git`), hidden top folders and symlinked parents; P2 tooltips showed other agents' names as rich text
+(now escaped, worktree tooltips too); P2 reference search also reads `.sh .py .toml .json .yml .yaml
+.command`; P3 named pipes no longer stall the search, `clamp_days` survives `Infinity`, records and the
+report are created mode 600. Each fix has a test; the walk cap, birth, pipe, mode and clamp mutants fail the suite.
+Suite: 229 passed. Accepted, not fixed: `trash_backup` re-scans all snapshots per ticked item (slow, not
+unsafe); the record stays if the move fails; the weekly-scan guard is per card and `last_workspace_scan`
+is written when a scan finishes; no process-cwd or nested-git gate for snapshots (Put Back restores);
+"scan deletes nothing" holds by call graph and a rmtree-patched test, not by module split; the Overview
+line is a tooltip; slice 1 items (d) and (e) still open. Not done: Verify (QA) pass, install, real Trash run.

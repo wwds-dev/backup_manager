@@ -22,6 +22,12 @@ def mk(root, rel, age_days, content="x"):
     return d
 
 
+@pytest.fixture(autouse=True)
+def _no_birth(monkeypatch):
+    """The temp folders are born 'now'; tests set ages with utime, so ignore birth/ctime here."""
+    monkeypatch.setattr(wx, "_birth", lambda folder: 0.0)
+
+
 @pytest.fixture
 def lab(tmp_path):
     root = tmp_path / "lab"
@@ -221,3 +227,53 @@ def test_symlink_inside_lab_is_never_offered(lab):
     (lab / "backups" / "link").symlink_to(inside)
     os.utime(lab / "backups" / "link", (OLD, OLD), follow_symlinks=False)
     assert not rows(lab)["link"]["eligible"]
+
+
+def test_copied_snapshot_with_old_mtimes_is_young_by_birth(lab, monkeypatch):
+    mk(lab, "backups/copied", 100)
+    monkeypatch.setattr(wx, "_birth", lambda folder: NOW - 2 * 86400)   # created two days ago
+    r = rows(lab)["copied"]
+    assert not r["eligible"] and "2 day" in r["reasons"][0]
+
+
+def test_walk_cap_means_age_unknown_not_offered(lab, monkeypatch):
+    mk(lab, "backups/big", 90)
+    monkeypatch.setattr(wx, "_WALK_CAP", 0)
+    r = rows(lab)["big"]
+    assert not r["eligible"] and r["reasons"][0] == "age unknown"
+
+
+def test_clamp_days_survives_infinity():
+    assert wx.clamp_days(float("inf"), 7, 60, 14) == 14
+
+
+def test_clean_caches_refuses_repo_and_symlinked_parent(lab, tmp_path):
+    (lab / "repo" / ".git").mkdir(parents=True); (lab / "repo" / "__pycache__").mkdir()
+    real = tmp_path / "real"; (real / "__pycache__").mkdir(parents=True)
+    (lab / "linked").symlink_to(real)
+    res = wx.clean_caches([lab / "repo" / "__pycache__", lab / "linked" / "__pycache__"], lab)
+    assert not any(ok for _, ok, _ in res)
+    assert (lab / "repo" / "__pycache__").exists() and (real / "__pycache__").exists()
+
+
+def test_script_naming_a_snapshot_blocks_it(lab):
+    mk(lab, "backups/snap_a", 50)
+    (lab / "active" / "p" / "docs" / "restore.sh").write_text("cp -a backups/snap_a .")
+    assert not rows(lab)["snap_a"]["eligible"]
+
+
+def test_named_pipe_doc_does_not_hang_the_search(lab):
+    mk(lab, "backups/snap_a", 50)
+    os.mkfifo(lab / "active" / "p" / "docs" / "x.md")
+    assert rows(lab)["snap_a"]["eligible"]   # skipped, returns instead of blocking
+
+
+def test_record_and_report_are_created_private(lab, tmp_path, monkeypatch):
+    monkeypatch.setattr(os, "chmod", lambda *a, **k: None)   # prove mode is set at creation
+    p = wx.write_report({"a": 1}, tmp_path / "r.json")
+    assert (os.stat(p).st_mode & 0o777) == 0o600
+
+
+def test_hidden_top_folder_cache_is_refused(lab):
+    (lab / ".stuff" / "__pycache__").mkdir(parents=True)
+    assert not wx.clean_caches([lab / ".stuff" / "__pycache__"], lab)[0][1]
