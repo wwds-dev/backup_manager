@@ -195,6 +195,11 @@ a file, e.g. `imprint-base`) count as git repos.
   the folder when the tool is missing, after a confirmation. Simulators and model caches
   start unticked; Docker is report-only. Anything outside your home folder, or a symlink,
   is refused.
+- **🗂 Workspace…** — old backup snapshots in the lab's `backups/` (offered when older than 30 days,
+  setting 7-120, and no non-history doc names them; they go to the **Trash** after a record is saved,
+  Put Back restores), cache folders outside `active/` (deleted, they regenerate), and a read-only list
+  of `archive/`. Nothing is ticked. A weekly report-only scan (on by default, switch in the dialog)
+  writes `workspace_report.json` and never deletes. The worktree age (default 14 days) is set here too.
 - **🌿 Worktrees…** — lists the git worktrees under the lab (agent worktrees in
   `.claude/worktrees/`, `archive/` checkouts, `worktrees/`) and offers one only when **every**
   gate passes: clean (no uncommitted or untracked files), merged into the repo's default branch
@@ -571,6 +576,7 @@ Never use `QThread.terminate()`. Reviewed in `docs/audit/qthread-lifetime-review
 | Path | What it is |
 |---|---|
 | `main.py` | The whole GUI: sidebar window and Overview page, cards, menu-bar icon, Settings, scheduling, `--run-backup` / `--background` |
+| `workspace_extra.py` | Qt-free rules for 🗂 Workspace: backup gates and Trash, archive list, root caches, weekly report |
 | `workspace.py` | Qt-free worktree rules for 🌿 Worktrees: gates, scan, restore record, removal |
 | `lab_health.py` | Qt-free Lab Health rules: cleanup, env use detection, rebuild records, commit warnings, thresholds, other caches |
 | `cloud_quota.py` | Google Drive / Dropbox OAuth and quota, manual accounts, the app-support folder (`SECRETS_DIR`) |

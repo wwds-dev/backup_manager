@@ -27,6 +27,7 @@ import urllib.request
 import appkit_guard
 import lab_health
 import workspace
+import workspace_extra
 import version
 from datetime import datetime
 from pathlib import Path
@@ -1154,6 +1155,23 @@ def _load_state() -> dict:
 def _save_state(data: dict) -> None:
     cloud_quota.SECRETS_DIR.mkdir(parents=True, exist_ok=True)
     _STATE_FILE.write_text(json.dumps(data, indent=2))
+
+
+def _plain_tip(text) -> str:
+    """Tooltips are rich text to Qt; folder names come from other agents, so show them literally."""
+    import html
+    return "<p style='white-space:pre'>" + html.escape(str(text)) + "</p>"
+
+
+def workspace_settings() -> dict:
+    """Ages and the weekly-scan switch, clamped, from state.json (Qt-free rules in workspace_extra)."""
+    st = _load_state()
+    return {"worktree_days": workspace_extra.clamp_days(st.get("worktree_min_days"), 7, 60, workspace.MIN_AGE_DAYS),
+            "backup_days": workspace_extra.clamp_days(st.get("backup_min_days"), 7, 120, workspace_extra.BACKUP_MIN_DAYS),
+            "weekly": st.get("workspace_weekly_scan", True) is not False}
+
+
+WORKSPACE_REPORT = cloud_quota.SECRETS_DIR / "workspace_report.json"
 
 
 # How long an overdue-backup notice stays quiet after being sent. Persisted to
@@ -3086,8 +3104,21 @@ class LabHealthCard(Card):
         wtbtn.clicked.connect(self.show_worktrees)
         self.worktrees_btn = wtbtn
         row.addWidget(wtbtn)
+        wsbtn = secondary_button("🗂 Workspace…")
+        wsbtn.setToolTip("Old backup snapshots (to the Trash), cache folders outside active/, and a "
+                         "read-only list of archive/. Nothing is ticked; a snapshot named in a "
+                         "non-history doc, or younger than the age below, is kept.")
+        wsbtn.clicked.connect(self.show_workspace)
+        self.workspace_btn = wsbtn
+        row.addWidget(wsbtn)
         row.addStretch()
         self.body(row)
+        # Weekly report-only scan: the app is a menu-bar resident, so no extra launchd job.
+        self._ws_timer = QTimer(self)
+        self._ws_timer.setInterval(60 * 60 * 1000)
+        self._ws_timer.timeout.connect(self._maybe_weekly_scan)
+        self._ws_timer.start()
+        QTimer.singleShot(90_000, self._maybe_weekly_scan)
 
         lab_health.apply_settings(lab_health.load_settings())
         trow = QHBoxLayout()
@@ -3235,7 +3266,8 @@ class LabHealthCard(Card):
         self.worktrees_btn.setEnabled(False)
         self.worktrees_btn.setText("🌿 Scanning…")
         root = LAB_ACTIVE.parent
-        worker = CallWorker(lambda: workspace.scan_worktrees(root))
+        wdays = workspace_settings()["worktree_days"]
+        worker = CallWorker(lambda: workspace.scan_worktrees(root, min_days=wdays))
         worker.done.connect(self._worktrees_ready)
         self._worktrees_worker = replace_worker(getattr(self, "_worktrees_worker", None), worker)
 
@@ -3249,13 +3281,14 @@ class LabHealthCard(Card):
             QMessageBox.information(self, "Worktrees", "No linked worktrees under the lab.")
             return
         root = LAB_ACTIVE.parent
+        wdays = workspace_settings()["worktree_days"]
         dlg = QDialog(self)
         dlg.setWindowTitle("Worktrees")
         dlg.resize(760, 560)
         lay = QVBoxLayout(dlg)
         head = QLabel(
             "Offered: clean, merged or pushed, untouched for "
-            f"{workspace.MIN_AGE_DAYS}+ days, nothing running inside, no ignored files that "
+            f"{wdays}+ days, nothing running inside, no ignored files that "
             "are not caches. Removing one runs `git worktree remove` (never forced) after "
             "saving a restore record; the branch stays. Everything else is kept, with the "
             "reason. Nothing is ticked.")
@@ -3270,13 +3303,13 @@ class LabHealthCard(Card):
             label = f"{human_size(r['kb'] * 1024)}  {r['rel']}  [{r['branch'] or 'detached'}]"
             if r["eligible"]:
                 cb = QCheckBox(label)
-                cb.setToolTip(f"{r['path']}\nrepo: {r['repo']}")
+                cb.setToolTip(_plain_tip(f"{r['path']}\nrepo: {r['repo']}"))
                 il.addWidget(cb)
                 boxes.append((cb, r))
             else:
                 lbl = QLabel(f"\u2022 {label}")
                 lbl.setTextFormat(Qt.PlainText)   # names come from other agents' repos
-                lbl.setToolTip(str(r["path"]))
+                lbl.setToolTip(_plain_tip(r["path"]))
                 il.addWidget(lbl)
                 why = QLabel("      kept: " + "; ".join(r["reasons"]))
                 why.setObjectName("CardSubtitle")
@@ -3325,7 +3358,7 @@ class LabHealthCard(Card):
             status.setText("Removing\u2026")
 
             def work():
-                return [(r, *workspace.remove_worktree(r, root)) for r in todo]
+                return [(r, *workspace.remove_worktree(r, root, min_days=wdays)) for r in todo]
 
             def finished(results):
                 go.setEnabled(True)
@@ -3343,6 +3376,204 @@ class LabHealthCard(Card):
             worker.done.connect(finished)
             self._worktrees_clean_worker = replace_worker(
                 getattr(self, "_worktrees_clean_worker", None), worker)
+
+        go.clicked.connect(run)
+        dlg.exec()
+
+    def _maybe_weekly_scan(self):
+        """Report only: counts and sizes into workspace_report.json. Deletes nothing."""
+        cfg = workspace_settings()
+        st = _load_state()
+        if not cfg["weekly"] or not workspace_extra.scan_due(st.get("last_workspace_scan")):
+            return
+        if getattr(self, "_ws_scan_worker", None) is not None and self._ws_scan_worker.isRunning():
+            return
+        root = LAB_ACTIVE.parent
+
+        def work():
+            rep = workspace_extra.build_report(root, min_days=cfg["backup_days"], wt_days=cfg["worktree_days"])
+            workspace_extra.write_report(rep, WORKSPACE_REPORT)
+            return rep
+
+        def done(rep):
+            if rep is None:
+                return
+            st2 = _load_state()
+            st2["last_workspace_scan"] = rep["scanned"]
+            _save_state(st2)
+            self.workspace_btn.setToolTip(
+                f"Last weekly scan: {rep['offered_items']} item(s), "
+                f"{human_size(rep['offered_kb'] * 1024)} waiting for your tick. Nothing was deleted.")
+
+        worker = CallWorker(work)
+        worker.done.connect(done)
+        self._ws_scan_worker = replace_worker(getattr(self, "_ws_scan_worker", None), worker)
+
+    def show_workspace(self):
+        self.workspace_btn.setEnabled(False)
+        self.workspace_btn.setText("🗂 Scanning…")
+        root = LAB_ACTIVE.parent
+        cfg = workspace_settings()
+
+        def work():
+            wts = workspace.scan_worktrees(root, min_days=cfg["worktree_days"])
+            return {"backups": workspace_extra.scan_backups(root, min_days=cfg["backup_days"]),
+                    "archive": workspace_extra.scan_archive(root, wts),
+                    "caches": workspace_extra.scan_root_caches(root)}
+
+        worker = CallWorker(work)
+        worker.done.connect(self._workspace_ready)
+        self._workspace_worker = replace_worker(getattr(self, "_workspace_worker", None), worker)
+
+    def _workspace_ready(self, data):
+        self.workspace_btn.setEnabled(True)
+        self.workspace_btn.setText("🗂 Workspace…")
+        if data is None:
+            QMessageBox.warning(self, "Workspace", "The scan failed.")
+            return
+        root = LAB_ACTIVE.parent
+        cfg = workspace_settings()
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Workspace")
+        dlg.resize(780, 620)
+        lay = QVBoxLayout(dlg)
+        head = QLabel(
+            f"Backups: offered when older than {cfg['backup_days']} days and no non-history doc names "
+            "them; they go to the Trash with a record (Put Back restores). Caches regenerate and are "
+            "deleted. Archive is a list only. Nothing is ticked.")
+        head.setWordWrap(True)
+        lay.addWidget(head)
+        srow = QHBoxLayout()
+        srow.addWidget(QLabel("Worktree age (days)"))
+        wspin = QSpinBox(); wspin.setRange(7, 60); wspin.setValue(cfg["worktree_days"])
+        srow.addWidget(wspin)
+        srow.addWidget(QLabel("Backup age (days)"))
+        bspin = QSpinBox(); bspin.setRange(7, 120); bspin.setValue(cfg["backup_days"])
+        srow.addWidget(bspin)
+        weekly = QCheckBox("Weekly report-only scan")
+        weekly.setChecked(cfg["weekly"])
+        srow.addWidget(weekly)
+        srow.addStretch()
+        lay.addLayout(srow)
+
+        def save_settings():
+            st = _load_state()
+            st.update({"worktree_min_days": wspin.value(), "backup_min_days": bspin.value(),
+                       "workspace_weekly_scan": weekly.isChecked()})
+            _save_state(st)
+        for w in (wspin, bspin):
+            w.valueChanged.connect(lambda _=0: save_settings())
+        weekly.toggled.connect(lambda _=False: save_settings())
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        inner = QWidget()
+        il = QVBoxLayout(inner)
+        boxes = []
+
+        def plain(text, sub=False):
+            lbl = QLabel(text)
+            lbl.setTextFormat(Qt.PlainText)   # names come from the lab's folders
+            lbl.setWordWrap(True)
+            if sub:
+                lbl.setObjectName("CardSubtitle")
+            il.addWidget(lbl)
+
+        plain("Backups")
+        for r in data["backups"]:
+            age = "age unknown" if r["days"] is None else f"{r['days']} d old"
+            label = f"{human_size(r['kb'] * 1024)}  {r['rel']}  ({age})"
+            if r["eligible"]:
+                cb = QCheckBox(label)
+                cb.setToolTip(_plain_tip(r["path"]))
+                il.addWidget(cb)
+                boxes.append(("backup", cb, r))
+            else:
+                plain("\u2022 " + label)
+                plain("      kept: " + "; ".join(r["reasons"]), True)
+        if not data["backups"]:
+            plain("No snapshots.", True)
+        plain("Cache folders outside active/")
+        for r in data["caches"]:
+            cb = QCheckBox(f"{human_size(r['kb'] * 1024)}  {r['rel']}")
+            cb.setToolTip(_plain_tip(r["path"]))
+            il.addWidget(cb)
+            boxes.append(("cache", cb, r))
+        if not data["caches"]:
+            plain("None found.", True)
+        plain("Archive (list only; git checkouts follow the Worktrees dialog)")
+        for r in data["archive"]:
+            plain(f"\u2022 {human_size(r['kb'] * 1024)}  {r['rel']}  ({'age unknown' if r['days'] is None else str(r['days']) + ' d'})")
+            for m in r["git_members"]:
+                plain("      " + m["rel"] + (": offered in Worktrees" if m["offered"]
+                                              else ": kept (" + "; ".join(m["reasons"][:2]) + ")"), True)
+        il.addStretch()
+        scroll.setWidget(inner)
+        lay.addWidget(scroll, 1)
+        status = QLabel("")
+        status.setTextFormat(Qt.PlainText)
+        status.setWordWrap(True)
+        lay.addWidget(status)
+        brow = QHBoxLayout()
+        go = QPushButton("🧹 Clean checked")
+        go.setEnabled(bool(boxes))
+        close = QPushButton("Close")
+        brow.addStretch()
+        brow.addWidget(go)
+        brow.addWidget(close)
+        lay.addLayout(brow)
+        close.clicked.connect(dlg.accept)
+
+        def run():
+            todo = [(k, r) for k, cb, r in boxes if cb.isChecked() and cb.isEnabled()]
+            if not todo:
+                status.setText("Nothing ticked.")
+                return
+            text = "\n".join(f"  {r['rel']}  ({human_size(r['kb'] * 1024)})" for _, r in todo[:12])
+            if len(todo) > 12:
+                text += f"\n  \u2026 and {len(todo) - 12} more"
+            box = QMessageBox(
+                QMessageBox.Question, "Clean workspace",
+                f"Clean {len(todo)} item(s) ({human_size(sum(r['kb'] for _, r in todo) * 1024)})?\n{text}\n\n"
+                "Backups are re-checked, then moved to the Trash (a record is saved first). "
+                "Cache folders are deleted for good; they regenerate.",
+                QMessageBox.Yes | QMessageBox.Cancel, dlg)
+            box.setTextFormat(Qt.PlainText)
+            box.setDefaultButton(QMessageBox.Cancel)
+            if box.exec() != QMessageBox.Yes:
+                return
+            go.setEnabled(False)
+            status.setText("Cleaning\u2026")
+            bdays = bspin.value()
+
+            def work():
+                out = []
+                caches = [r["path"] for k, r in todo if k == "cache"]
+                for k, r in todo:
+                    if k == "backup":
+                        out.append((r, *workspace_extra.trash_backup(
+                            r, root, lambda p: QFile.moveToTrash(p), min_days=bdays)))
+                for (p, ok, msg), r in zip(workspace_extra.clean_caches(caches, root),
+                                           [r for k, r in todo if k == "cache"]):
+                    out.append((r, ok, msg))
+                return out
+
+            def finished(results):
+                go.setEnabled(True)
+                if results is None:
+                    status.setText("Cleaning failed unexpectedly.")
+                    return
+                mark = {True: "\u2713", False: "\u2717"}
+                status.setText("\n".join(f"{mark[ok]} {r['rel']}: {msg}" for r, ok, msg in results))
+                for k, cb, r in boxes:
+                    if any(r is x[0] and x[1] for x in results):
+                        cb.setChecked(False)
+                        cb.setEnabled(False)
+
+            worker = CallWorker(work)
+            worker.done.connect(finished)
+            self._workspace_clean_worker = replace_worker(
+                getattr(self, "_workspace_clean_worker", None), worker)
 
         go.clicked.connect(run)
         dlg.exec()

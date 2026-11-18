@@ -2,3 +2,6 @@
 {"ts": "2026-11-17T23:34:18", "gate": "architect", "by": "owner", "words": "Approve Architect", "recorded_by": "agent", "spec": "workspace-cleanup"}
 {"ts": "2026-11-18T14:49:27", "gate": "decision", "by": "owner", "words": "MIT", "recorded_by": "agent", "spec": "workspace-cleanup", "note": "licence choice for the public tier: MIT"}
 {"ts": "2026-11-18T14:54:08", "gate": "release", "by": "owner", "words": "I signed, run Release / quit and run", "recorded_by": "agent", "spec": "workspace-cleanup"}
+{"ts": "2026-11-18T15:02:54", "gate": "define", "by": "owner", "words": "Approve Define", "recorded_by": "agent", "spec": "workspace-cleanup"}
+{"ts": "2026-11-18T17:03:49", "gate": "architect", "by": "owner", "words": "yes", "recorded_by": "agent", "spec": "workspace-cleanup"}
+{"ts": "2026-11-18T17:36:30", "gate": "release", "by": "owner", "words": "go with recommendation", "recorded_by": "agent", "spec": "workspace-cleanup"}

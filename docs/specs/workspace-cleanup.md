@@ -288,3 +288,114 @@ removal. Added 10 tests for exactly those; all of those mutants are now killed. 
 Not covered: the dialog's remove flow in `main.py` (display only is tested), two minor
 `lab_health.in_foreign_tree` mutants (backslash normalisation, ValueError return), and no real
 removal has been run on the lab. The QA agent has not re-run on the new tests.
+
+## 14. Define: slice 2 (Archive, Backups, Caches), 2026-11-18, awaiting the Define gate
+Owner answers (2026-11-18): backup age **30 days**; a README tree line or history note does **not**
+block a snapshot (listed in the tooltip); an unreferenced snapshot gets **no** earlier rule; Drive
+`_deleted/` stays **manual** (report-only line plus a suggested prune command); weekly scan **on,
+report-only, never deletes**. Not asked, proposed: worktree age becomes a setting (default 14, range 7-60).
+
+**Re-measured 2026-11-18** (`du -sk`, mtime ages, read-only): `archive/fixes_2026-10-12` 143 MB
+(slice 1 removed `provisio-deps`; its restore record exists); of its 4 registered worktrees none is
+offered (sentinel unmerged; imprint has ignored `data`; two provisio lack a manifest for `node_modules`).
+So Archive adds almost nothing for git members: slice 1 already covers them. `backups/`: 7 snapshots,
+332 MB; 5 over 30 days (`pre_backstage_split` 51 d 45 MB, `pre_headroom_merge` 49 d 117 MB,
+`pre_identity_rewrite_0924` 55 d 20 MB, `pre_identity_rewrite_1009` 40 d 25 MB, `sonar-app-prev` 37 d
+98 MB). Non-history docs naming them: `sonar-app-prev`, `sonar-data` (sonar audit/spec, block);
+`pre_identity_rewrite_1009` named nowhere. Lab README tree names three others (does not block).
+Root `__pycache__` 188 KB. `runners/` 878 MB, unknown purpose, stays manual. Drive `_deleted/`: not measured.
+
+**Scope of slice 2** (all offered only by tick + confirm; nothing pre-ticked):
+1. **Archive:** list every `archive/*` entry with size and age (new: `archive/artifacts` 9.4 MB,
+   `autopilot-2026-11-17` 7.9 MB). Git members are shown with their slice-1 verdict (no second removal
+   path). Non-git folders are **report-only**, never offered.
+2. **Backups:** offered when older than 30 d and no non-history doc (not README tree lines, not
+   `docs/history/**`, not `lab-notes-*`) names it, searched in lab `AGENTS.md`, `docs/`, each project's
+   `AGENTS.md`, `TODO.md`, `docs/` (a real search, not a glob). Move to the **Trash** (never `rmtree`),
+   restore record first ("no record, no trash"). Today's result would be: 4 offered (about 207 MB:
+   `pre_backstage_split`, `pre_headroom_merge`, `pre_identity_rewrite` x2), `sonar-app-prev` blocked, rest too young.
+3. **Caches outside `active/`:** same cache names as Lab Health, lab root and top-level scratch folders,
+   skipping `.claude` and worktrees; permanent delete as today.
+4. **Report-only:** Drive `_deleted/` line (only if the owner enables it) and `runners/`/`~/Documents`
+   items from section 5; weekly report-only scan writes `workspace_report.json`.
+5. Worktree age setting (default 14) wired to slice 1's gate.
+
+Not in scope: `folder_audit.py` duplication, `lab_health.py:62` hardening, readiness-audit findings,
+dashboards consolidation. Success measure: section 7 tests per gate, mutation-checked, plus a read-only
+real dry run showing the 4 backups offered, `sonar-*` blocked, and one real Trash entry with its record.
+Next: Define gate (owner), then Architect gate (new Trash and scan-schedule boundaries), Build, Review, Secure, Verify.
+
+## 15. Proposed Architect: slice 2 (needs the Architect gate: new state, Trash boundary, schedule)
+- **Modules (Qt-free, like `workspace.py`):** new `workspace_extra.py` (keeps `workspace.py` focused on
+  worktrees): `scan_archive(lab_root)`, `scan_backups(lab_root, min_days, now)`, `backup_references(name, lab_root)`,
+  `scan_root_caches(lab_root)`, `build_report(...)`. `main.py` only renders rows and calls them, same as the
+  Worktrees dialog. Gates return reasons, never silent; each row stores its gate results.
+- **Backups gate:** age (mtime of the newest file inside, not the folder) over `backup_min_days` (default 30)
+  and no reference in the searched files (lab `AGENTS.md`, `docs/` minus `docs/history/**` and `lab-notes-*`,
+  each project's `AGENTS.md`, `TODO.md`, `docs/`; README excluded per the owner). Search is a plain
+  substring read of text files, size-capped, no shell, symlinks skipped. Snapshot must be a real directory
+  directly under `backups/` and inside the lab root; a failed search blocks (fail closed).
+- **Removal:** `QFile.moveToTrash` (the call Lab Health uses, `main.py:3764`), never `rmtree`. Record first in
+  `backup_records/<id>.json` (path, size, age, mode 600 in a 700 folder; restore = "Put Back" from the
+  Trash); no record, no trash. Gates are re-run at click time. Qt stays in `main.py`; the module takes the
+  mover as a parameter so tests use a fake.
+- **Caches outside `active/`:** reuse Lab Health's cache names and `in_foreign_tree`; scope is the lab root and
+  its top-level scratch folders only, never `.claude`, `archive`, `backups`, symlinks or other repos' trees.
+- **Archive:** read-only; git members take slice 1's verdict via `scan_worktrees` (no second removal path).
+- **Weekly scan (no new launchd agent):** the app is already a menu-bar resident, so a single `QTimer` checks
+  `last_workspace_scan` in `state.json`; if older than 7 days it runs `build_report` in a `QThread` via
+  `start_thread()` (invariant), writes `workspace_report.json` (mode 600) and updates the Overview line.
+  Setting `workspace_weekly_scan` (default on), read-only code path, no delete function reachable from it
+  (tested: the scan module imports no mover). When the app is not running the scan does not run (accepted).
+- **Settings:** `worktree_min_days` (7-60, default 14) and `backup_min_days` (7-120, default 30), clamped;
+  stored in `state.json`.
+- **Boundary:** writes only to this app's own folder plus Trash moves of `backups/<name>` under the lab root
+  and the existing cache deletes. No network, no git writes, no Drive access in this slice.
+- **Open for the owner:** none new; the in-app timer instead of a launchd job is the only design choice to confirm.
+  After this gate: Plan, Build, Review (different agent), Verify, Secure, Document.
+
+## 16. Build log: slice 2 (2026-11-18)
+Approvals recorded: Define slice 2 ("Approve Define"), Architect ("yes"). Built: `workspace_extra.py`
+(backup gates, Trash via an injected mover, archive list, root caches, weekly report), the **🗂 Workspace…**
+dialog and in-app weekly timer in `main.py`, settings in `state.json`, README/TODO. Tests: 221 passed
+(24 new in `test_workspace_extra.py`, 2 in `test_workspace_dialog.py`); gates mutation-checked (age, reference,
+size-cap fail-closed, eligibility recheck, record-before-move, symlink, cache-root exclusions, repo skip,
+history/lab-notes/self-spec exclusion, clock skew); one mutant (`parent.name != "backups"` in `trash_backup`)
+is equivalent because the scan already rejects such paths. Real read-only dry run: offered 3 backups (about
+185 MB: `pre_headroom_merge`, `pre_backstage_split`, `pre_identity_rewrite_20261009`); kept
+`sonar-app-prev` and `pre_identity_rewrite_20260924` (named in `docs/reorg_suggestions_2026-09-26.md`, a
+non-history doc, so it blocks: differs from the Define estimate of 4), `sonar-data`, `agents_md_pre_consolidation`;
+caches: root `__pycache__` and `dashboards/__pycache__`. Deviation: the Overview line is a tooltip on the
+Workspace button (no Overview widget yet). Not done: independent review, Secure, Verify, install, real Trash run.
+
+## 17. Review and Secure log: slice 2 (2026-11-18)
+Independent code-reviewer and security-engineer passes on dd5b9c0 (full reports in the shared notes folder,
+`review-slice2.md`, `secure-slice2.md`). No P0. Fixed: **P1** the age gate failed open at the 50,000-entry
+walk cap (now "age unknown", kept); **P1** a snapshot copied with `cp -a` kept old mtimes and was offered
+(age is now the youngest of newest mtime and the folder's birth/ctime); P2 `clean_caches` re-checks the repo
+(`.git`), hidden top folders and symlinked parents; P2 tooltips showed other agents' names as rich text
+(now escaped, worktree tooltips too); P2 reference search also reads `.sh .py .toml .json .yml .yaml
+.command`; P3 named pipes no longer stall the search, `clamp_days` survives `Infinity`, records and the
+report are created mode 600. Each fix has a test; the walk cap, birth, pipe, mode and clamp mutants fail the suite.
+Suite: 229 passed. Accepted, not fixed: `trash_backup` re-scans all snapshots per ticked item (slow, not
+unsafe); the record stays if the move fails; the weekly-scan guard is per card and `last_workspace_scan`
+is written when a scan finishes; no process-cwd or nested-git gate for snapshots (Put Back restores);
+"scan deletes nothing" holds by call graph and a rmtree-patched test, not by module split; the Overview
+line is a tooltip; slice 1 items (d) and (e) still open. Not done: Verify (QA) pass, install, real Trash run.
+
+## 18. Verify log: slice 2 (2026-11-18)
+Independent qa-engineer pass on 26bbb8f (report: `verify-slice2.md` in the shared notes folder). Verdict
+**PASS with gaps**, no production bug. Suite green; the two new test files ran 3x without flakes; 78 mutants
+planted in a copy: 58 caught, 20 survived. Real read-only dry run: offered exactly `pre_headroom_merge`,
+`pre_backstage_split`, `pre_identity_rewrite_20261009`; `sonar-app-prev` and `pre_identity_rewrite_20260924`
+kept (named by non-history docs); caches `__pycache__`, `dashboards/__pycache__`; no worktree or Trash action
+was run. Gaps closed with 15 new tests (suite now 238 passed): `_maybe_weekly_scan` (switch, interval, saves
+the time, deletes nothing), the dialog's Clean button (only ticked items, Cancel default, Cancel does nothing,
+age setting reaches the click-time re-check, kept backup has no box), the real `_birth`, the 120-day clamp,
+`active/` caches refused, record never overwrites, report totals, backup sort order. Re-run survivors on
+`main.py`/`workspace_extra.py`: weekly switch, interval, last-scan save, default button, `min_days=0`,
+ignore-ticks, kept-backup-gets-a-box, birth, cache-root and record-overwrite mutants are now all killed.
+Still untested: branch coverage (no `pytest-cov` in the venv), the real `QFile.moveToTrash` and a real Trash
+entry, the in-app QTimer firing, two weekly scans overlapping. Not done: install, release, merge.
+Release needs a fresh `legal_gate.py check`: run from this worktree it says "no legal pack: docs/legal/register.md
+is missing" (docs/legal is git-ignored and lives only in the main checkout); it must be run there. In the main checkout it says "clear" today (before this branch is merged); it must be re-run after the merge.
