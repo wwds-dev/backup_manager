@@ -195,6 +195,16 @@ a file, e.g. `imprint-base`) count as git repos.
   the folder when the tool is missing, after a confirmation. Simulators and model caches
   start unticked; Docker is report-only. Anything outside your home folder, or a symlink,
   is refused.
+- **🌿 Worktrees…** — lists the git worktrees under the lab (agent worktrees in
+  `.claude/worktrees/`, `archive/` checkouts, `worktrees/`) and offers one only when **every**
+  gate passes: clean (no uncommitted or untracked files), merged into the repo's default branch
+  or pushed, untouched for 14 days, no running process with its working directory inside
+  (and if `lsof` fails, nothing is offered), not a project folder under `active/`, not locked,
+  and no git-ignored file that is not a known cache (`.env`, `data/`, nested repos, `node_modules`
+  or `build` without a manifest all block). Nothing is ticked. Removal re-checks everything,
+  saves a restore record in `worktree_records/`, then runs `git worktree remove` (never
+  forced); the branch stays. Kept rows show why. Lab Health's own scan never lists anything
+  inside `.claude/` or a linked worktree.
 - **Right-click any row** → Open in Finder / Terminal, **Show largest folders…** (the ten
   biggest folders over 1 MB up to two levels deep, so a big `.git` or data folder stands
   out); on a dirty repo also Commit changes and Show changes in Terminal; on a project
@@ -561,6 +571,7 @@ Never use `QThread.terminate()`. Reviewed in `docs/audit/qthread-lifetime-review
 | Path | What it is |
 |---|---|
 | `main.py` | The whole GUI: sidebar window and Overview page, cards, menu-bar icon, Settings, scheduling, `--run-backup` / `--background` |
+| `workspace.py` | Qt-free worktree rules for 🌿 Worktrees: gates, scan, restore record, removal |
 | `lab_health.py` | Qt-free Lab Health rules: cleanup, env use detection, rebuild records, commit warnings, thresholds, other caches |
 | `cloud_quota.py` | Google Drive / Dropbox OAuth and quota, manual accounts, the app-support folder (`SECRETS_DIR`) |
 | `verify.py` | Backup spot-check library (not wired into the app yet) |
@@ -635,3 +646,7 @@ exactly the moment someone is asking.
 This is the lab-wide scheme, shared with `imprint`, `sonar` and `lab_hub`, and
 the Lab Project Monitor computes the same string from the same two inputs, so
 the dashboard and the running app cannot disagree.
+
+## Licence
+
+MIT, see `LICENSE`. The licence does not grant any right to the name "Backup Control Center" as a trademark. Third-party libraries keep their own licences (PySide6/Qt is LGPL-3.0).

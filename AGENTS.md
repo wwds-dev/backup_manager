@@ -90,7 +90,9 @@ unchanged behaviour, and phases the tier table marks "no". Say which were skippe
 - Full suite green in every mode; new logic mutation-checked.
 - Reviewer P0/P1 findings fixed or explicitly deferred by the owner.
 - CHANGELOG entry; docs updated; version bumped per the app's versioning doc.
-- CI green and the tooling baseline (`docs/foundry/tooling-baseline.md`) has not regressed.
+- CI green and the tooling baseline (`docs/foundry/tooling-baseline.md`) has not regressed. Where CI is
+  unavailable, the local check named in app-context (`## Commands`, `## Invariants`) passes on the exact
+  commit, its summary pasted into the review report or release note.
 - `legal_gate.py check` passes for the tier; every public claim is on the checked claims list.
 - `public`, `commercial`: `SUPPORT.md` and a private security contact exist. `client`:
   `order.py gate <id> done` passes in the HQ.
@@ -106,7 +108,8 @@ unchanged behaviour, and phases the tier table marks "no". Say which were skippe
 - **No agent is a lawyer, accountant or regulator.** Flag what needs a qualified person; cite the
   rule, its source and date; never give a legal or tax opinion or record a sign-off.
 - Concurrent sessions may share this worktree: stage files by name, never `git add -A`.
-- Do not commit, push, or release without the owner asking.
+- Commit and push your own finished work before going idle, without asking; stage files by name.
+  Merge and release only when the owner asks. A command's own stricter rule wins.
 - Playbooks (`docs/playbooks/<role>.md`) are Foundry's copies: never hand-edit them in an app.
   `status: baseline` or `last-reviewed` over 90 days old means stale: say so.
 

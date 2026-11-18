@@ -1,6 +1,6 @@
 # Security
 
-Backup Control Center is free, open-source software maintained by one person. It holds OAuth tokens for your cloud accounts in the macOS Keychain and runs a backup job over your files,
+Backup Control Center is free software under the MIT licence, maintained by one person. It keeps OAuth tokens for your cloud accounts in a local file readable only by your user (`~/Library/Application Support/Backup Control Center/tokens.json`, mode 0600) and runs a backup job over your files,
 so security reports are welcome.
 
 ## Report privately

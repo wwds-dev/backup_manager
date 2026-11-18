@@ -1041,6 +1041,36 @@ def rebuild_from_record(rec: dict, runner=subprocess.run,
     return ok, msg
 
 
+def _is_linked_worktree(folder: Path) -> bool:
+    """True when `folder/.git` is a file pointing into `<repo>/.git/worktrees/` (a linked
+    worktree). A submodule's `.git` file points into `.git/modules/`, so it is not one."""
+    g = folder / ".git"
+    try:
+        if not g.is_file():
+            return False
+        return "/worktrees/" in g.read_text(errors="replace").replace("\\", "/")
+    except OSError:
+        return False
+
+
+def in_foreign_tree(proj: Path, path: Path) -> bool:
+    """True when `path` sits inside another checkout's tree under `proj`: a `.claude/`
+    folder (agent worktrees live in `.claude/worktrees/`) or a linked git worktree.
+    Those belong to whoever made them, never to this project's cleanup (lab AGENTS.md:
+    never silently clean another agent's worktree)."""
+    proj = Path(os.path.abspath(proj))
+    try:
+        rel = Path(os.path.abspath(path)).relative_to(proj)
+    except ValueError:
+        return False
+    cur = proj
+    for part in rel.parts[:-1]:          # every folder between the project and the target
+        cur = cur / part
+        if part == ".claude" or _is_linked_worktree(cur):
+            return True
+    return _is_linked_worktree(Path(os.path.abspath(path)))   # a worktree named `dist`
+
+
 def cleanup_targets(rows: list[dict], junk_rows: set[int],
                     env_rows: set[int]) -> list[dict]:
     """Folders to delete for the ticked rows: caches from `junk_rows`, environments
@@ -1059,7 +1089,7 @@ def cleanup_targets(rows: list[dict], junk_rows: set[int],
             if item["kind"] == "env" and (i not in env_rows or not item["eligible"]):
                 continue
             p = Path(item["path"])
-            if p.is_symlink():
+            if p.is_symlink() or in_foreign_tree(base, p):
                 continue
             try:
                 p.resolve().relative_to(base)

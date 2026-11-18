@@ -200,7 +200,9 @@ agent typing the number the owner gave.
 - CHANGELOG entry; docs updated; version bumped per the app's versioning doc.
 - CI is green and the tooling baseline (`docs/foundry/tooling-baseline.md`, from `/harden`) has not
   regressed: no new lint/type findings, coverage at or above the floor, no secrets, no new
-  vulnerable dependency.
+  vulnerable dependency. Where CI is unavailable, the local check named in app-context
+  (`## Commands`, `## Invariants`) passes on the exact commit, its summary pasted into the review
+  report or release note; "not run" is not a pass.
 - `legal_gate.py check` passes for the app's tier, and every claim in release notes, listing
   and landing copy is on the checked claims list.
 - For `public` and `commercial`: `SUPPORT.md` and a private security contact (`SECURITY.md`,
@@ -221,7 +223,8 @@ agent typing the number the owner gave.
 - **No agent is a lawyer, accountant or regulator.** Flag what needs a qualified person; cite
   the rule, its source and date; never give a legal or tax opinion or record a sign-off.
 - Concurrent sessions may share this worktree: stage files by name, never `git add -A`.
-- Do not commit, push, or release without the owner asking.
+- Commit and push your own finished work before going idle, without asking; stage files by name.
+  Merge and release only when the owner asks. A command's own stricter rule wins.
 - Read `docs/foundry/app-context.md` first; app-specific invariants there override defaults.
 
 ## Staying current
