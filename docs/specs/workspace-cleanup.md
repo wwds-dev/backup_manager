@@ -324,3 +324,32 @@ Not in scope: `folder_audit.py` duplication, `lab_health.py:62` hardening, readi
 dashboards consolidation. Success measure: section 7 tests per gate, mutation-checked, plus a read-only
 real dry run showing the 4 backups offered, `sonar-*` blocked, and one real Trash entry with its record.
 Next: Define gate (owner), then Architect gate (new Trash and scan-schedule boundaries), Build, Review, Secure, Verify.
+
+## 15. Proposed Architect: slice 2 (needs the Architect gate: new state, Trash boundary, schedule)
+- **Modules (Qt-free, like `workspace.py`):** new `workspace_extra.py` (keeps `workspace.py` focused on
+  worktrees): `scan_archive(lab_root)`, `scan_backups(lab_root, min_days, now)`, `backup_references(name, lab_root)`,
+  `scan_root_caches(lab_root)`, `build_report(...)`. `main.py` only renders rows and calls them, same as the
+  Worktrees dialog. Gates return reasons, never silent; each row stores its gate results.
+- **Backups gate:** age (mtime of the newest file inside, not the folder) over `backup_min_days` (default 30)
+  and no reference in the searched files (lab `AGENTS.md`, `docs/` minus `docs/history/**` and `lab-notes-*`,
+  each project's `AGENTS.md`, `TODO.md`, `docs/`; README excluded per the owner). Search is a plain
+  substring read of text files, size-capped, no shell, symlinks skipped. Snapshot must be a real directory
+  directly under `backups/` and inside the lab root; a failed search blocks (fail closed).
+- **Removal:** `QFile.moveToTrash` (the call Lab Health uses, `main.py:3764`), never `rmtree`. Record first in
+  `backup_records/<id>.json` (path, size, age, mode 600 in a 700 folder; restore = "Put Back" from the
+  Trash); no record, no trash. Gates are re-run at click time. Qt stays in `main.py`; the module takes the
+  mover as a parameter so tests use a fake.
+- **Caches outside `active/`:** reuse Lab Health's cache names and `in_foreign_tree`; scope is the lab root and
+  its top-level scratch folders only, never `.claude`, `archive`, `backups`, symlinks or other repos' trees.
+- **Archive:** read-only; git members take slice 1's verdict via `scan_worktrees` (no second removal path).
+- **Weekly scan (no new launchd agent):** the app is already a menu-bar resident, so a single `QTimer` checks
+  `last_workspace_scan` in `state.json`; if older than 7 days it runs `build_report` in a `QThread` via
+  `start_thread()` (invariant), writes `workspace_report.json` (mode 600) and updates the Overview line.
+  Setting `workspace_weekly_scan` (default on), read-only code path, no delete function reachable from it
+  (tested: the scan module imports no mover). When the app is not running the scan does not run (accepted).
+- **Settings:** `worktree_min_days` (7-60, default 14) and `backup_min_days` (7-120, default 30), clamped;
+  stored in `state.json`.
+- **Boundary:** writes only to this app's own folder plus Trash moves of `backups/<name>` under the lab root
+  and the existing cache deletes. No network, no git writes, no Drive access in this slice.
+- **Open for the owner:** none new; the in-app timer instead of a launchd job is the only design choice to confirm.
+  After this gate: Plan, Build, Review (different agent), Verify, Secure, Document.

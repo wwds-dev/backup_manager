@@ -20,3 +20,5 @@
 {"ts": "2026-11-18T14:56:00", "phase": "release", "state": "done", "spec": "workspace-cleanup"}
 {"ts": "2026-11-18T15:02:33", "phase": "define", "state": "start", "spec": "workspace-cleanup"}
 {"ts": "2026-11-18T15:02:54", "phase": "define", "state": "done", "spec": "workspace-cleanup"}
+{"ts": "2026-11-18T15:45:26", "phase": "architect", "state": "start", "spec": "workspace-cleanup"}
+{"ts": "2026-11-18T15:45:40", "phase": "architect", "state": "done", "spec": "workspace-cleanup"}
