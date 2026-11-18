@@ -353,3 +353,17 @@ Next: Define gate (owner), then Architect gate (new Trash and scan-schedule boun
   and the existing cache deletes. No network, no git writes, no Drive access in this slice.
 - **Open for the owner:** none new; the in-app timer instead of a launchd job is the only design choice to confirm.
   After this gate: Plan, Build, Review (different agent), Verify, Secure, Document.
+
+## 16. Build log: slice 2 (2026-11-18)
+Approvals recorded: Define slice 2 ("Approve Define"), Architect ("yes"). Built: `workspace_extra.py`
+(backup gates, Trash via an injected mover, archive list, root caches, weekly report), the **🗂 Workspace…**
+dialog and in-app weekly timer in `main.py`, settings in `state.json`, README/TODO. Tests: 221 passed
+(24 new in `test_workspace_extra.py`, 2 in `test_workspace_dialog.py`); gates mutation-checked (age, reference,
+size-cap fail-closed, eligibility recheck, record-before-move, symlink, cache-root exclusions, repo skip,
+history/lab-notes/self-spec exclusion, clock skew); one mutant (`parent.name != "backups"` in `trash_backup`)
+is equivalent because the scan already rejects such paths. Real read-only dry run: offered 3 backups (about
+185 MB: `pre_headroom_merge`, `pre_backstage_split`, `pre_identity_rewrite_20261009`); kept
+`sonar-app-prev` and `pre_identity_rewrite_20260924` (named in `docs/reorg_suggestions_2026-09-26.md`, a
+non-history doc, so it blocks: differs from the Define estimate of 4), `sonar-data`, `agents_md_pre_consolidation`;
+caches: root `__pycache__` and `dashboards/__pycache__`. Deviation: the Overview line is a tooltip on the
+Workspace button (no Overview widget yet). Not done: independent review, Secure, Verify, install, real Trash run.

@@ -22,3 +22,5 @@
 {"ts": "2026-11-18T15:02:54", "phase": "define", "state": "done", "spec": "workspace-cleanup"}
 {"ts": "2026-11-18T15:45:26", "phase": "architect", "state": "start", "spec": "workspace-cleanup"}
 {"ts": "2026-11-18T15:45:40", "phase": "architect", "state": "done", "spec": "workspace-cleanup"}
+{"ts": "2026-11-18T17:03:49", "phase": "build", "state": "start", "spec": "workspace-cleanup"}
+{"ts": "2026-11-18T17:10:00", "phase": "build", "state": "done", "spec": "workspace-cleanup"}
