@@ -749,3 +749,35 @@ def test_a_linked_worktree_named_like_a_cache_is_never_cleaned(tmp_path):
     assert lh.in_foreign_tree(proj, proj / "dist")
     rows = [_row("p", path=str(proj), items=[_item(proj / "dist", kind="env")])]
     assert lh.cleanup_targets(rows, {0}, {0}) == []
+
+
+def _hostile_repo(tmp_path):
+    """A repo whose local config runs a script (fsmonitor) and whose hook would run on commit."""
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "config", "user.email", "t@t"); _git(tmp_path, "config", "user.name", "t")
+    marker = tmp_path.parent / (tmp_path.name + "-ran")
+    fs = tmp_path.parent / (tmp_path.name + "-fsm.sh")
+    fs.write_text(f"#!/bin/sh\necho fsmonitor >> '{marker}'\n")
+    fs.chmod(0o755)
+    _git(tmp_path, "config", "core.fsmonitor", str(fs))
+    hook = tmp_path / ".git" / "hooks" / "pre-commit"
+    hook.write_text(f"#!/bin/sh\necho hook >> '{marker}'\n")
+    hook.chmod(0o755)
+    return marker
+
+
+def test_commit_warnings_never_runs_repo_fsmonitor(tmp_path):
+    marker = _hostile_repo(tmp_path)
+    (tmp_path / "a.txt").write_text("x")
+    lh.commit_warnings(tmp_path)
+    assert not marker.exists()
+
+
+def test_git_helper_never_runs_repo_fsmonitor_or_hooks(tmp_path):
+    marker = _hostile_repo(tmp_path)
+    (tmp_path / "a.txt").write_text("x")
+    lh._git(tmp_path, "status", "--porcelain")
+    lh._git(tmp_path, "add", "-A")
+    rc, out = lh._git(tmp_path, "commit", "-m", "m")
+    assert rc == 0, out
+    assert not marker.exists()

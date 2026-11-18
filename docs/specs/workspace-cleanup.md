@@ -399,3 +399,11 @@ Still untested: branch coverage (no `pytest-cov` in the venv), the real `QFile.m
 entry, the in-app QTimer firing, two weekly scans overlapping. Not done: install, release, merge.
 Release needs a fresh `legal_gate.py check`: run from this worktree it says "no legal pack: docs/legal/register.md
 is missing" (docs/legal is git-ignored and lives only in the main checkout); it must be run there. In the main checkout it says "clear" today (before this branch is merged); it must be re-run after the merge.
+
+## 19. Slice 1 leftovers closed (2026-11-18)
+(d) `lab_health.py` `_git` and the `commit_warnings` status call now run git with `--no-optional-locks`,
+`core.fsmonitor=false` and `core.hooksPath=/dev/null`, as `workspace.py` does. Side effect: "Commit all" in
+Lab Health no longer runs a project's own pre-commit hook (gitleaks still runs). Two tests plant a repo-local
+fsmonitor script and a pre-commit hook; both mutants (flags removed from `_git`, from the status call) fail
+them. (e) `docs/foundry/app-context.md` placeholders filled from code, README, TODO and tests (Invariants
+untouched; its own template line stays). No CHANGELOG file exists; the note lives here and in `TODO.md`.
