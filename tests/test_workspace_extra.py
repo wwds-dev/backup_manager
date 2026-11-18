@@ -277,3 +277,38 @@ def test_record_and_report_are_created_private(lab, tmp_path, monkeypatch):
 def test_hidden_top_folder_cache_is_refused(lab):
     (lab / ".stuff" / "__pycache__").mkdir(parents=True)
     assert not wx.clean_caches([lab / ".stuff" / "__pycache__"], lab)[0][1]
+
+
+def test_real_birth_time_counts(tmp_path, monkeypatch):
+    """Un-stub _birth: a folder created just now is young even when its files look old."""
+    monkeypatch.undo()
+    d = tmp_path / "lab" / "backups" / "fresh"
+    d.mkdir(parents=True)
+    f = d / "f.txt"; f.write_text("x")
+    os.utime(f, (OLD, OLD)); os.utime(d, (OLD, OLD))
+    (tmp_path / "lab" / "active").mkdir()
+    r = {x["path"].name: x for x in wx.scan_backups(tmp_path / "lab", now=time.time())}["fresh"]
+    assert not r["eligible"] and r["days"] == 0
+
+
+def test_backup_clamp_upper_bound_and_active_caches(lab):
+    assert wx.clamp_days(500, 7, 120, 30) == 120
+    (lab / "active" / "__pycache__").mkdir()
+    assert not wx.clean_caches([lab / "active" / "__pycache__"], lab)[0][1]
+
+
+def test_record_never_overwrites_and_report_totals(lab, tmp_path):
+    p = mk(lab, "backups/snap_a", 50)
+    a = wx.write_backup_record({"path": p, "kb": 1}, tmp_path / "r", NOW)
+    b = wx.write_backup_record({"path": p, "kb": 2}, tmp_path / "r", NOW)
+    assert a != b and json.loads(a.read_text())["kb"] == 1
+    mk(lab, "backups/snap_b", 60, "yy"); (lab / "__pycache__").mkdir()
+    rep = wx.build_report(lab, now=NOW, cwds=[])
+    assert rep["offered_items"] == 3 and rep["offered_kb"] == (
+        rep["backups"]["offered_kb"] + rep["caches"]["kb"])
+
+
+def test_backups_sorted_offered_first_then_by_size(lab):
+    mk(lab, "backups/young", 1, "z" * 9000); mk(lab, "backups/old_small", 50); mk(lab, "backups/old_big", 50, "z" * 9000)
+    names = [r["path"].name for r in wx.scan_backups(lab, now=NOW)]
+    assert names[-1] == "young" and set(names[:2]) == {"old_small", "old_big"}

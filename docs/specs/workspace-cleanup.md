@@ -382,3 +382,20 @@ unsafe); the record stays if the move fails; the weekly-scan guard is per card a
 is written when a scan finishes; no process-cwd or nested-git gate for snapshots (Put Back restores);
 "scan deletes nothing" holds by call graph and a rmtree-patched test, not by module split; the Overview
 line is a tooltip; slice 1 items (d) and (e) still open. Not done: Verify (QA) pass, install, real Trash run.
+
+## 18. Verify log: slice 2 (2026-11-18)
+Independent qa-engineer pass on 26bbb8f (report: `verify-slice2.md` in the shared notes folder). Verdict
+**PASS with gaps**, no production bug. Suite green; the two new test files ran 3x without flakes; 78 mutants
+planted in a copy: 58 caught, 20 survived. Real read-only dry run: offered exactly `pre_headroom_merge`,
+`pre_backstage_split`, `pre_identity_rewrite_20261009`; `sonar-app-prev` and `pre_identity_rewrite_20260924`
+kept (named by non-history docs); caches `__pycache__`, `dashboards/__pycache__`; no worktree or Trash action
+was run. Gaps closed with 15 new tests (suite now 238 passed): `_maybe_weekly_scan` (switch, interval, saves
+the time, deletes nothing), the dialog's Clean button (only ticked items, Cancel default, Cancel does nothing,
+age setting reaches the click-time re-check, kept backup has no box), the real `_birth`, the 120-day clamp,
+`active/` caches refused, record never overwrites, report totals, backup sort order. Re-run survivors on
+`main.py`/`workspace_extra.py`: weekly switch, interval, last-scan save, default button, `min_days=0`,
+ignore-ticks, kept-backup-gets-a-box, birth, cache-root and record-overwrite mutants are now all killed.
+Still untested: branch coverage (no `pytest-cov` in the venv), the real `QFile.moveToTrash` and a real Trash
+entry, the in-app QTimer firing, two weekly scans overlapping. Not done: install, release, merge.
+Release needs a fresh `legal_gate.py check`: run from this worktree it says "no legal pack: docs/legal/register.md
+is missing" (docs/legal is git-ignored and lives only in the main checkout); it must be run there.
