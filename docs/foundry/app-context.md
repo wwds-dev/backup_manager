@@ -4,7 +4,13 @@ The only app-specific file the Foundry agents read. Fill it in once; keep it sho
 true. Agents treat the **Invariants** as hard rules.
 
 ## Product
-<one paragraph: what it is, who it is for, what it must never claim or do>
+Backup Control Center: a PySide6 macOS menu-bar and window app for one person (the owner). It
+monitors cloud storage (Mac disk, Google Drive, Dropbox, iCloud), runs and verifies the nightly rsync
+backup to Google Drive, shows Time Machine and git_autosync state, and cleans up the lab workspace
+(Lab Health caches and envs, worktrees, backups, system caches). It must never claim a backup is safe
+beyond what it checked ("OK" means copied to the local Drive folder, not that Google received it; see
+the readiness audit H3), never delete without a ticked box and a confirm dialog, and never touch
+another agent's worktree or an out-of-tree project.
 
 ## Distribution
 tier: public
@@ -20,26 +26,52 @@ nobody else is meant to use it, making the repo private and setting `internal` r
 LICENSE, privacy note, name check and sign-off.
 
 ## Stack
-<languages, frameworks, with versions; the radar reads this to know what to watch>
+Python 3 in a uv-managed `.venv` (no version pin), PySide6 (Qt; unpinned) and `requests`
+(`requirements.txt`). Shell: `rsync` and bash scripts under `_Admin/backup/`, `launchctl`, `tmutil`,
+`pmset`, `lsof`, `git`, `gitleaks`. Packaged with PyInstaller. Single large `main.py` plus
+`lab_health.py`, `workspace.py`, `workspace_extra.py`, `cloud_quota.py`, `verify.py`, `appkit_guard.py`,
+`version.py`. macOS only.
 
 ## Commands
-- Install deps: `<cmd>`
-- Run tests (list every mode that must pass): `<cmd>`
-- Lint / types: `<cmd>`
-- Build / package: `<cmd>`
-- Release smoke test checklist: <launch, core action, quit, relaunch with state intact, ...>
+- Install deps: `uv pip install -r requirements.txt` into `.venv`
+- Run tests: `.venv/bin/python -m pytest` (one mode; `pytest.ini`: `testpaths = tests`, `--strict-markers`)
+- Lint / types: none configured
+- Build / package: `./build_app.sh` (PyInstaller, stamps the version, installs to /Applications)
+- Release smoke test checklist: launch the installed app; the window title shows the new `v<MAJOR>.<BUILD>`;
+  Overview loads; Lab Health scan runs; quit; relaunch with `state.json` settings intact.
 
 ## Docs and process files
-<README, CHANGELOG, versioning doc, backlog file, user docs, UI entry points, design conventions>
+`README.md` (product, config files, tests, versioning), `TODO.md` (backlog, priority/owner legend),
+`SUGGESTIONS.md`, `SECURITY.md`, `SUPPORT.md`, `LICENSE`. No CHANGELOG file: changes are recorded as
+done items in `TODO.md` and the spec's verify and release logs in `docs/specs/`. Version is
+`v<MAJOR>.<BUILD>` from `VERSION` and `git rev-list --count HEAD` (README "Version"). UI entry points:
+the sidebar pages and the menu-bar icon in `main.py`.
 
 ## Architecture hot spots
-<locks, threads, state files, module boundaries, nested repos, external providers>
+- Threads: every `QThread` starts via `start_thread()` (see Invariants); the Overview and scans use workers.
+- Single instance: `gui.lock` (`fcntl`) in `~/Library/Application Support/Backup Control Center/`; launchd's
+  `--run-backup` bypasses it.
+- State: `state.json` (settings, overdue cooldown, webhook URL), `tokens.json`, `env_last_use.json`,
+  restore records, all in that folder (`cloud_quota.SECRETS_DIR`).
+- Module boundaries: Qt-free rules in `lab_health.py`, `workspace.py`, `workspace_extra.py`; widgets in `main.py`.
+- Nested repos: Lab Health walks `lab/active/<project>/`, other agents' repos and worktrees.
+- External: Google Drive and Dropbox APIs (`cloud_quota.py`), `_Admin/backup/*.sh`, launchd, Time Machine.
 
 ## Security surface
-<entry points, secrets and where they live, untrusted input paths, dependency manifests, packaging>
+- Secrets: Google Drive and Dropbox OAuth tokens in `tokens.json` (mode 600, not the Keychain); a webhook
+  URL in `state.json`. The secrets vault and plaintext findings are in `docs/specs/secrets-vault.md` and the
+  readiness audit.
+- Network: HTTPS to Google and Dropbox quota APIs; the failure webhook.
+- Untrusted input: repo-local git config and hooks, and branch, folder and file names in other agents'
+  repos (git runs with `core.fsmonitor=false`, `core.hooksPath=/dev/null`); plist and bundle contents.
+- File writes and deletes: rsync to Drive, Trash moves with restore records, permanent cache deletes.
+- Dependencies: `requirements.txt` (unpinned). Packaging: PyInstaller `.app` from `build_app.sh`.
 
 ## Test bar
-<coverage target, test layout, what counts as flaky>
+No coverage target (`pytest-cov` is not installed). Tests live in `tests/`, one file per module or page,
+with `tmp_path` and patched app-data folders so a run never touches live data. New logic is
+mutation-checked by hand. A test that passes alone and fails in the suite, or the reverse, is flaky and
+is fixed, not rerun. `test_appkit_guard.py` needs the `lab_hub` checkout beside this repo.
 
 ## Invariants
 <things agents must never do or imply, e.g. "no real money", "no network calls", copy rules>
@@ -55,4 +87,4 @@ None. For a regulated or expert domain (money, insurance, health, law, ...), nam
 `/new-app` and `/adopt-app` propose it; `install.sh --with domain-<key>` installs the reviewer.
 
 ## Optional roles installed
-<model-validator? other?>
+None.

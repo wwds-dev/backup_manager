@@ -59,8 +59,12 @@ def save_ignored(names: set[str], path: Path | None = None) -> None:
     path.write_text(json.dumps(sorted(names), indent=1))
 
 
+# Projects here are written by other agents: never run a repo-local fsmonitor or hook.
+_SAFE_GIT = ("--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null")
+
+
 def _git(proj: Path, *args: str, timeout: int = 60):
-    r = subprocess.run(["git", "-C", str(proj), *args], capture_output=True, text=True,
+    r = subprocess.run(["git", *_SAFE_GIT, "-C", str(proj), *args], capture_output=True, text=True,
                        timeout=timeout)
     return r.returncode, (r.stdout + r.stderr).strip()
 
@@ -132,7 +136,7 @@ def commit_warnings(proj: Path) -> list[str]:
     if _git(proj, "symbolic-ref", "-q", "HEAD", timeout=20)[0]:
         out.append("Detached HEAD: the commit would belong to no branch and is easy to lose.")
     try:
-        r = subprocess.run(["git", "-C", str(proj), "status", "--porcelain=v1", "-z", "-uall"],
+        r = subprocess.run(["git", *_SAFE_GIT, "-C", str(proj), "status", "--porcelain=v1", "-z", "-uall"],
                            capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.SubprocessError):
         return out + ["Could not read the change list."]
