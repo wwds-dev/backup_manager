@@ -10,7 +10,7 @@ absolute app root. Work only there.
 Read `docs/foundry/tooling/README.md` (policy) and `docs/foundry/app-context.md` (stack, commands).
 If `docs/foundry/tooling/` is missing, run `./install.sh --update <app>` from the HQ first.
 
-Rules: **add files only.** Do not edit application source, tests, or existing CI. Do not commit,
+Rules: **add files only** (one exception, step 2b). Do not edit application source, tests, or existing CI. Do not commit,
 push, change git config, or activate hooks. Download nothing except running `uvx ruff`,
 `uvx pip-audit` and `gitleaks` locally for measurement.
 
@@ -21,6 +21,16 @@ push, change git config, or activate hooks. Download nothing except running `uvx
    and add only `security.yml`. Always add `security.yml` (fill `__AUDIT_CMD__`: `pip install
    pip-audit && pip-audit -r requirements.txt`, or `npm audit --audit-level=high`),
    `.github/dependabot.yml` (fill ecosystems; the format is in the template's header comment), and `.gitleaks.toml` (template as is: no empty `[allowlist]` table).
+   **Release gate:** add `common/release.yml` as `.github/workflows/release.yml` (as is). If the app
+   already has a release or publish workflow, leave it and report that its publish jobs need
+   `needs: release-gate` (an owner action). For an app whose legal pack is kept in the HQ
+   (`docs/legal` in `.gitignore`), still add it and report that it fails in CI by design.
+2b. **Release script.** The one exception to "add files only": in the script that builds what
+   ships (`build_app.sh`, `release.sh`, a `release` npm script; named in app-context `## Commands`),
+   insert as the first command `python3 docs/foundry/tooling/release_check.py . || exit 1`
+   (`"prerelease"` npm script for Node). Change nothing else in it. Run the check once and report
+   its result: a BLOCKED app will not build until the owner clears it, so say so in the report. No
+   such script: report it (`UNVERIFIED`), add nothing.
 3. **Python lint.** If the app has no ruff config, copy `python/ruff.toml` to the app root.
 4. **Hook.** Copy `common/githooks/pre-commit` to `.githooks/pre-commit` (executable). Do not activate.
 5. **Measure the baseline, report-only.** If `ruff` is not on PATH use `uvx ruff`. Lint count:
@@ -34,7 +44,9 @@ push, change git config, or activate hooks. Download nothing except running `uvx
    `__PLACEHOLDER__` remains (`grep -rn "__[A-Z_]*__" .github .gitleaks.toml`).
 8. **Report** in 10 lines: files added (note `baseline.json` must be committed with them), baseline numbers, and **owner actions**: branch protection
    (require `quality` + review), repo secrets if any, activate the hook with `git config
-   core.hooksPath .githooks`, any gitleaks findings (rotate, do not allowlist), missing remote.
+   core.hooksPath .githooks`, any gitleaks findings (rotate, do not allowlist), missing remote, the release
+   check's result (BLOCKED means the release script will not build), and any existing publish
+   workflow that still needs `needs: release-gate`.
 
 ## Notes from the first runs (apply them)
 - **Never leave caches or data in the app:** run ruff with `--no-cache`; write coverage data to a

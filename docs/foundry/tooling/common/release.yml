@@ -1,0 +1,29 @@
+# Release gate (Foundry). /harden copies this to .github/workflows/release.yml as is.
+# Runs on a version tag and by hand. Any job that builds, signs or publishes a release goes in this
+# file with `needs: release-gate`, so it cannot run while the gate fails.
+# --ci: no Foundry HQ in CI. For tier `client` the order gate (`order.py gate <id> done`) is printed
+# NOT CHECKED here; the orchestrator runs it in the HQ. An app whose legal pack is kept in the HQ
+# (install.sh --legal-in-hq) has no pack in a CI clone, so this job fails there by design: release
+# such an app from the owner's machine, where the release script runs the same check.
+name: release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  release-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Legal gate (and client order gate where reachable)
+        run: python3 docs/foundry/tooling/release_check.py . --ci
+
+  # publish:
+  #   needs: release-gate
+  #   ...

@@ -19,16 +19,22 @@ Existing apps have debt. The baseline is measured once, recorded in
 ## Files
 - `python/quality.yml`, `node/quality.yml`: CI templates with `__PLACEHOLDERS__` that `/harden` fills from the app's `app-context.md`. No placeholder may remain.
 - `common/security.yml`: gitleaks on every push, dependency audit weekly.
+- `common/release.yml`: the CI `release` job (on a `v*` tag or by hand) runs `release_check.py . --ci`; every publish job `needs: release-gate`.
+- `release_check.py`: the first step of every release (see "Legal sign-off gate").
 - `common/dependabot.yml`, `common/.gitleaks.toml`, `python/ruff.toml`.
 - `common/githooks/pre-commit`: secrets and lint on staged files. **Not activated automatically**: the owner runs `git config core.hooksPath .githooks` (it would also gate autosync commits).
 - `ratchet.py`: fail if a count rose above `baseline.json`; `--update` lowers it. A count command that exits non-zero or cannot be found fails the ratchet (exit 2) and never sets a baseline, so the command must use the checker's report-only option. Always count with `ruff check --no-cache --quiet --output-format=concise --exit-zero .` (without `--quiet` ruff adds summary lines that inflate the count). `baseline.json` lives beside it and **must be committed**, or the CI ratchet fails.
 
 ## Legal sign-off gate
-`legal_gate.py` (stdlib) decides whether Release may start, from files only:
+`legal_gate.py` (stdlib) is the legal gate, from files only. `release_check.py .` runs it as the
+first command of the app's release script and of the CI `release` job (`/harden` wires both); for
+tier `client` it also runs `order.py gate <id> done` from the HQ given `--hq PATH` or
+`FOUNDRY_HQ`, fails without one, and with `--ci` reports the order gate NOT CHECKED (the order is
+private to the HQ). Where `/harden` has not wired it, `sre-release` runs it; nothing else does.
 
 | Command | Who runs it | What it does |
 |---|---|---|
-| `legal_gate.py status <app>` | anyone | tier, pack files, pack hash, last sign-off, open lawyer triggers |
+| `legal_gate.py status <app>` | anyone | tier, pack files, pack hash, last sign-off, open lawyer triggers, warnings |
 | `legal_gate.py check <app>` | agents, CI, the dashboard | exit 0 when the tier's sign-off rule is met, else 1 with the reasons |
 | `legal_gate.py sign <app> --by NAME --role owner\|lawyer [--accept-risk WHY]` | **a person, in a terminal** | appends one line to `docs/legal/signoff.jsonl`, bound to the hash of `docs/legal/` |
 
@@ -39,14 +45,15 @@ the app's `.claude/settings.json` for the command and for edits of `signoff.json
 Write tools, a shell redirect or `tee`). A permission pattern cannot catch every shell spelling,
 so a line appended by hand is not detectable by the gate: git history shows who committed it. The hash covers every file under `docs/legal/` except
 `signoff.jsonl`: editing any of them after signing makes the sign-off stale. Tier `internal` needs
-no sign-off; an unset tier fails; `public` needs `register.md`, `licences.md`, `privacy.md` and
-`name.md` present before it can be signed, `commercial` and `client` also `terms.md`. An open `- [ ] LAWYER:` line in `docs/legal/register.md` needs
+no sign-off but `register.md` and `licences.md`, and its open lawyer triggers are warnings; an unset tier fails; `public` needs `register.md`, `licences.md`, `privacy.md` and
+`name.md` present before it can be signed, `commercial` and `client` also `terms.md`. An open `- [ ] LAWYER:` line in `docs/legal/register.md` (any case, spacing or list marker:
+`+`, `*`, `1.`; `status` and `check` warn on a lawyer line they cannot read) needs
 `--role lawyer`, or the owner's `--accept-risk`.
 
 For an app whose own repo is public, `install.sh --legal-in-hq <app>` keeps the pack in the Foundry
 HQ (`audits/<app>/legal/`) and makes `docs/legal` a git-ignored link to it. The gate reads through
-the link and the hash is unchanged by the move. A fresh clone or a git worktree has no link: run
-the gate from the main checkout, and `install.sh --update` puts a missing link back.
+the link and the hash is unchanged by the move. A fresh clone or a git worktree has no link, so
+the CI `release` job fails for such an app by design: run the gate from the main checkout, and `install.sh --update` puts a missing link back.
 
 ## Records the Foundry workspace reads
 Stdlib only; each writes one file in `docs/foundry/` and nothing else. A value nobody entered stays

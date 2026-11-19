@@ -65,12 +65,16 @@ unchanged behaviour, and phases the tier table marks "no". Say which were skippe
 ## Always (full text in PROCESS.md under the same names)
 - **Client delivery.** The order lives in the Foundry HQ (`orders/<id>.toml`), never here. Agents
   never contact the client, send, chase, invoice, charge or accept a contract. No Build before
-  `python3 tools/order.py gate <id> build --spec <slug>` passes in the HQ. A client's acceptance is
-  recorded, never inferred.
+  `python3 tools/order.py gate <id> build --spec <slug>` passes in the HQ: the orchestrator runs it;
+  nothing in this repo can, because the order is not here. A client's acceptance is recorded, never
+  inferred.
 - **Legal sign-off.** Agents prepare and check; a person signs. Never run `legal_gate.py sign`,
   never edit `docs/legal/signoff.jsonl`, never write "compliant", "approved" or "legally
-  reviewed". `python3 docs/foundry/tooling/legal_gate.py check .` decides whether Release may
-  start. Lawyer triggers are open `- [ ] LAWYER:` lines in `docs/legal/register.md`. Never
+  reviewed". Release starts only when `python3 docs/foundry/tooling/release_check.py .` passes
+  (the legal gate; for `client` with `--hq`, also the order gate). `/harden` wires it into the
+  release script and a CI `release` job; where it is not wired yet, `sre-release` runs it and stops.
+  Lawyer triggers are open `- [ ] LAWYER:` lines (any case, any list marker) in
+  `docs/legal/register.md`; for `internal` they warn and do not block. Never
   `git add -f` anything under `docs/legal`.
 - **Legal consults** and the optional **Domain specialist** review at Define, Architect and Review,
   read-only; their P0/P1 findings count like a reviewer's.
@@ -93,7 +97,7 @@ unchanged behaviour, and phases the tier table marks "no". Say which were skippe
 - CI green and the tooling baseline (`docs/foundry/tooling-baseline.md`) has not regressed. Where CI is
   unavailable, the local check named in app-context (`## Commands`, `## Invariants`) passes on the exact
   commit, its summary pasted into the review report or release note.
-- `legal_gate.py check` passes for the tier; every public claim is on the checked claims list.
+- `release_check.py .` (the legal gate) passes for the tier; every public claim is on the checked claims list.
 - `public`, `commercial`: `SUPPORT.md` and a private security contact exist. `client`:
   `order.py gate <id> done` passes in the HQ.
 - An app that calls a model: unit tests use fakes or fixtures; the live eval ran on the cheapest

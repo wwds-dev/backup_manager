@@ -80,8 +80,8 @@ Rules for you, the orchestrator:
    `customer-support` writes `SUPPORT.md` and `docs/support/plan.md`; then `legal-compliance`
    checks the claims list. If that changed anything under `docs/legal/`, `check` fails again
    and step 6 repeats. Nothing is published, posted or sent by an agent.
-8. Then `sre-release` (a gate: ask before building or installing). It runs `legal_gate.py check`
-   first and stops if it fails. For tier `client`, `customer-support` writes
+8. Then `sre-release` (a gate: ask before building or installing). It runs
+   `release_check.py .` first (for `client`: `--hq <this HQ>`) and stops if it fails. For tier `client`, `customer-support` writes
    `docs/engagement/handover.md` from `docs/foundry/tooling/handover_template.md` (with
    `sre-release` for deployment, runbook and credentials, `legal-compliance` for the licence
    inventory and disclosures); the owner hands it over and tells you when the client accepted

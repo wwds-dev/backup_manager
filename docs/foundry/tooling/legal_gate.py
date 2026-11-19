@@ -34,7 +34,8 @@ REGISTER = "register.md"
 # What a pack must hold before it can be signed, per tier (docs/legal/<name>). `terms.md` and
 # `ai-act.md` are also expected for `public` when the product needs disclaimers or uses a model;
 # that is the agent's and the signer's judgement, so it is not enforced here.
-REQUIRED = {"public": ("register.md", "licences.md", "privacy.md", "name.md"),
+REQUIRED = {"internal": ("register.md", "licences.md"),
+            "public": ("register.md", "licences.md", "privacy.md", "name.md"),
             "commercial": ("register.md", "licences.md", "privacy.md", "name.md", "terms.md"),
             "client": ("register.md", "licences.md", "privacy.md", "name.md", "terms.md",
                        "client/services-agreement.md", "client/sow.md", "client/dpa.md",
@@ -43,7 +44,15 @@ REQUIRED = {"public": ("register.md", "licences.md", "privacy.md", "name.md"),
 # signed this app's pack once, this counts as an open trigger even when the register lists none.
 CLIENT_FIRST_USE = ("first use of the client contract templates (docs/legal/client/): no lawyer "
                     "sign-off recorded for this app yet")
-TRIGGER = re.compile(r"^\s*[-*] \[ \]\s*\**LAWYER\b\**:?\s*(.*)$", re.M)
+# A trigger is an unticked list item that starts with LAWYER, in any case, after any list marker
+# (`-`, `*`, `+`, `1.`, `1)`) and any spacing: `- [ ] LAWYER:`, `+  [ ] **Lawyer**:`, `2. [ ] lawyer x`.
+TRIGGER = re.compile(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+\[[ \t]*\][ \t]*\**LAWYER\b\**[ \t]*:?[ \t]*(.*)$",
+                     re.M | re.I)
+# A line that looks meant as one but is not read as one, mentioning a lawyer outside `code`: an
+# unticked box, a list item starting with "lawyer", or a bare `LAWYER:` line. `status` and `check` warn.
+_CODE = re.compile(r"`[^`]*`")
+_LOOKS_LIKE_TRIGGER = re.compile(r"\[[ \t]*\]|^[ \t]*(?:[-*+]|\d+[.)])[ \t]*\**lawyer\b|^[ \t]*\**LAWYER\**[ \t]*:",
+                                 re.I | re.M)
 
 
 def foundry_dir(app: Path) -> Path:
@@ -108,6 +117,22 @@ def open_triggers(app: Path) -> list[str]:
     return [m.group(1).strip() for m in TRIGGER.finditer(text)]
 
 
+def unparsed_trigger_lines(app: Path) -> list[str]:
+    """Lines in the register that look like a lawyer trigger but are not read as one, so the person
+    writing them can fix the format instead of the gate silently passing (`- LAWYER: x`, `- [] lawyer`)."""
+    try:
+        text = (app / "docs" / "legal" / REGISTER).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    out = []
+    for n, line in enumerate(text.splitlines(), 1):
+        bare = _CODE.sub("", line)
+        if (re.search(r"lawyer", bare, re.I) and _LOOKS_LIKE_TRIGGER.search(bare)
+                and not TRIGGER.match(line) and not re.match(r"^[ \t]*(?:[-*+]|\d+[.)])[ \t]+\[[xX~]\]", line)):
+            out.append(f"register.md:{n}: {line.strip()[:120]}")
+    return out
+
+
 def missing_files(app: Path, t: str | None) -> list[str]:
     """Pack files the tier requires that are absent or empty."""
     legal = app / "docs" / "legal"
@@ -139,18 +164,24 @@ def evaluate(app: Path) -> dict:
     last = signs[-1] if signs else None
     current = [s for s in signs if s["hash"] == h] if h else []
     reasons: list[str] = []
+    warnings = [f"line mentions a lawyer but is not read as a trigger (write `- [ ] LAWYER: ...`): {u}"
+                for u in unparsed_trigger_lines(app)]
     proposed = t is not None and tier_proposed(app)
     if t is None:
         reasons.append("no distribution tier in docs/foundry/app-context.md (## Distribution, tier:)")
     elif proposed:
         reasons.append(f"distribution tier {t} is proposed, {PROPOSED}: to confirm, delete that "
                        "line under ## Distribution in docs/foundry/app-context.md")
-    elif t in NEEDS_SIGNOFF:
+    else:  # internal needs register.md and licences.md; the others a pack and a sign-off
         gaps = missing_files(app, t)
         if not (app / "docs" / "legal" / REGISTER).is_file():
             reasons.append("no legal pack: docs/legal/register.md is missing")
         elif gaps:
             reasons.append(f"legal pack incomplete for tier {t}: missing {', '.join(gaps)}")
+        elif t not in NEEDS_SIGNOFF:
+            # Tier internal: no sign-off, so an open trigger warns and does not stop Release (owner's
+            # decision 2026-11-19, audit M2). It still needs a person's attention.
+            warnings += [f"open lawyer trigger (tier internal: not blocking, needs a person): {x}" for x in trig]
         elif not signs:
             reasons.append("no legal sign-off recorded")
         elif not current:
@@ -161,7 +192,8 @@ def evaluate(app: Path) -> dict:
     return {"tier": t, "tier_proposed": proposed, "needs_signoff": t in NEEDS_SIGNOFF, "hash": h,
             "files": [p.relative_to(app).as_posix() for p in pack_files(app)],
             "open_triggers": trig, "last_signoff": last,
-            "valid_signoff": current[-1] if current else None, "ok": not reasons, "reasons": reasons}
+            "valid_signoff": current[-1] if current else None, "ok": not reasons, "reasons": reasons,
+            "warnings": warnings}
 
 
 def _commit(app: Path) -> str | None:
@@ -254,6 +286,8 @@ def main(argv: list[str] | None = None) -> int:
                                    if last else "none"))
         for t in s["open_triggers"]:
             print(f"open lawyer trigger: {t}")
+    for w in s["warnings"]:
+        print(f"legal gate: WARNING: {w}")
     if s["ok"]:
         print("legal gate: clear" + ("" if s["needs_signoff"] else " (tier internal needs no sign-off)"))
         return 0

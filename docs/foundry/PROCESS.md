@@ -96,13 +96,16 @@ Every change that is more than a typo goes through these phases. Each ends in a 
 - **Before Build**, the orchestrator runs `python3 tools/order.py gate <id> build --spec <slug>`
   in the HQ. It refuses when the quote or the spec is not accepted, when the spec changed after
   the client accepted it, or when a change request for it is not accepted by both. No build
-  without it passing.
+  without it passing. Only the orchestrator enforces this: the order is private to the HQ, so
+  nothing in the app repo or its CI can check it.
 - **Handover** at Release: `docs/engagement/handover.md` from
   `docs/foundry/tooling/handover_template.md` (source and licence inventory, credentials the
   client must own, deployment and runbook, data-processing and AI-use disclosures, support
   contact, what the warranty covers and until when). Every line ticked `- [x]` or marked
   `- [~] n/a: <reason>`. Then `order.py handover <id> --on D --warranty-days N`, and
   `order.py gate <id> done` must pass: delivery accepted, checklist closed, dates recorded.
+  `release_check.py . --hq <HQ>` (or `FOUNDRY_HQ`) runs it on the owner's machine and fails
+  without the HQ; in CI (`--ci`) it is reported NOT CHECKED and the orchestrator runs it in the HQ.
 - **Money** is records only, in the order: quote, invoices (draft, sent, paid, with dates).
 - **Contract pack** `docs/legal/client/` (services agreement, SOW, DPA, acceptance and
   warranty terms), drafted by `legal-compliance` as DRAFT. Until a lawyer has signed the app's
@@ -130,15 +133,24 @@ at **Review** (licences of new dependencies, claims in copy, notices), each into
 
 **Legal sign-off.** Agents prepare and check; they never approve. A legal document is `DRAFT`,
 then `CHECKED (agent)`, and only a person makes it `SIGNED OFF`:
-- `python3 docs/foundry/tooling/legal_gate.py check .` decides whether Release may start. It
-  fails when the tier is unset, the pack is missing, there is no sign-off, the pack changed
-  after the sign-off, or a lawyer trigger is open and only the owner signed without accepting
-  the risk in writing.
+- `python3 docs/foundry/tooling/legal_gate.py check .` is the legal gate. It fails when the tier
+  is unset or only proposed, the tier's pack is missing (`internal`: `register.md` and
+  `licences.md`), there is no sign-off, the pack changed after the sign-off, or a lawyer trigger
+  is open and only the owner signed without accepting the risk in writing. Tier `internal` needs
+  no sign-off: an open trigger there is a warning, not a stop (owner, 2026-11-19).
+- `python3 docs/foundry/tooling/release_check.py .` is the first step of every release: it runs
+  the legal gate (and, for `client` with `--hq`, the order gate). `/harden` makes it the first
+  line of the script that builds what ships and adds a CI `release` job (`release.yml`, on a
+  version tag) that every publish job `needs:`. Until an app is wired, the promise rests on
+  `sre-release` running it and stopping; nothing else enforces it. A person can still build by
+  hand outside the script: the gate stops the pipeline, not the owner.
 - `python3 docs/foundry/tooling/legal_gate.py sign . --by "<name>" --role owner|lawyer` records
   a sign-off against a hash of `docs/legal/`. **A person runs it in a terminal. Agents never
   run `sign`**, never edit `docs/legal/signoff.jsonl`, and never write "compliant", "approved"
   or "legally reviewed" anywhere.
-- **Lawyer triggers** (an open `- [ ] LAWYER:` line in `docs/legal/register.md`): a possibly
+- **Lawyer triggers** (an open `- [ ] LAWYER:` line in `docs/legal/register.md`; any case and
+  list marker, `+`, `*` or `1.` too; `status` and `check` warn on a line that mentions a lawyer
+  and looks like a trigger but is not read as one): a possibly
   high-risk AI Act classification; special-category or children's data; regulated finance,
   insurance, health or gambling activity; a DPIA with high residual risk; the first commercial
   terms and the client contract templates; a trademark conflict or filing. The owner may
@@ -203,7 +215,7 @@ agent typing the number the owner gave.
   vulnerable dependency. Where CI is unavailable, the local check named in app-context
   (`## Commands`, `## Invariants`) passes on the exact commit, its summary pasted into the review
   report or release note; "not run" is not a pass.
-- `legal_gate.py check` passes for the app's tier, and every claim in release notes, listing
+- `release_check.py .` (the legal gate) passes for the app's tier, and every claim in release notes, listing
   and landing copy is on the checked claims list.
 - For `public` and `commercial`: `SUPPORT.md` and a private security contact (`SECURITY.md`,
   a `security.txt` or a security section in `SUPPORT.md`) exist; for `commercial` the support
@@ -237,7 +249,8 @@ agent typing the number the owner gave.
 ## Machine-checked gates
 `/harden <app>` wires CI, lint, coverage, secret and dependency scanning into an app (see
 `docs/foundry/tooling/README.md`). These checks, not an agent's opinion, decide whether a build
-fails. `legal_gate.py check` is the same kind of gate for the legal sign-off. What stays with
+fails. `release_check.py` (the legal gate) is the same kind of gate for Release once `/harden`
+has wired it into the release script and CI. What stays with
 the owner: branch protection, repo secrets, the GitHub connector, activating the git hook, and
 every sign-off.
 
