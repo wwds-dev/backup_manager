@@ -6,6 +6,7 @@
 
 COUNT_COMMAND prints findings one per line (or a single integer); the count is the number of
 non-empty lines, or the integer. The baseline lives in baseline.json next to this script.
+The command must exit successfully (use the checker's report-only/exit-zero option).
 """
 import json
 import subprocess
@@ -16,7 +17,10 @@ BASE = Path(__file__).with_name("baseline.json")
 
 
 def count(cmd: list[str]) -> int:
-    out = subprocess.run(cmd, capture_output=True, text=True).stdout.strip()
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise ValueError(f"checker exited with status {result.returncode}")
+    out = result.stdout.strip()
     if out.isdigit():
         return int(out)
     return sum(1 for line in out.splitlines() if line.strip())
@@ -30,7 +34,13 @@ def main(argv: list[str]) -> int:
         return 2
     name, cmd = argv[0], argv[1:]
     data = json.loads(BASE.read_text()) if BASE.is_file() else {}
-    now = count(cmd)
+    try:
+        now = count(cmd)
+    except (OSError, ValueError):
+        # Diagnostics can contain private configuration; do not echo stderr or
+        # infer a passing count when the checker itself did not complete.
+        print(f"{name}: quality command failed; no passing count or baseline update recorded")
+        return 2
     if update:
         if name in data and now > data[name]:
             print(f"{name}: {now} is above baseline {data[name]}; refusing to raise it")

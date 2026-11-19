@@ -1,7 +1,11 @@
 {
   "permissions": {
     "deny": [
-      "Bash(*legal_gate.py sign*)"
+      "Bash(*legal_gate.py sign*)",
+      "Edit(**/legal/signoff.jsonl)",
+      "Write(**/legal/signoff.jsonl)",
+      "Bash(*>*signoff.jsonl*)",
+      "Bash(*tee*signoff.jsonl*)"
     ]
   },
   "hooks": {

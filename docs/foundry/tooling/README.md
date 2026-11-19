@@ -10,7 +10,7 @@ Existing apps have debt. The baseline is measured once, recorded in
 | Check | Blocks the build? | Starts at |
 |---|---|---|
 | Tests | yes | whatever passes today; a red suite is reported, not hidden |
-| Lint (ruff / eslint) | only if the violation count rises (`ratchet.py`) | the measured count |
+| Lint (ruff / eslint) | if the violation count rises, or the checker exits non-zero or is missing (`ratchet.py`, exit 2) | the measured count |
 | Types (mypy / tsc) | only if the error count rises, once enabled | the measured count |
 | Coverage | yes, below the floor | measured value minus 1 point |
 | Secrets (gitleaks) | **yes**, any finding | zero (allowlist needs the owner) |
@@ -21,7 +21,7 @@ Existing apps have debt. The baseline is measured once, recorded in
 - `common/security.yml`: gitleaks on every push, dependency audit weekly.
 - `common/dependabot.yml`, `common/.gitleaks.toml`, `python/ruff.toml`.
 - `common/githooks/pre-commit`: secrets and lint on staged files. **Not activated automatically**: the owner runs `git config core.hooksPath .githooks` (it would also gate autosync commits).
-- `ratchet.py`: fail if a count rose above `baseline.json`; `--update` lowers it. Always count with `ruff check --no-cache --quiet --output-format=concise --exit-zero .` (without `--quiet` ruff adds summary lines that inflate the count). `baseline.json` lives beside it and **must be committed**, or the CI ratchet fails.
+- `ratchet.py`: fail if a count rose above `baseline.json`; `--update` lowers it. A count command that exits non-zero or cannot be found fails the ratchet (exit 2) and never sets a baseline, so the command must use the checker's report-only option. Always count with `ruff check --no-cache --quiet --output-format=concise --exit-zero .` (without `--quiet` ruff adds summary lines that inflate the count). `baseline.json` lives beside it and **must be committed**, or the CI ratchet fails.
 
 ## Legal sign-off gate
 `legal_gate.py` (stdlib) decides whether Release may start, from files only:
@@ -33,8 +33,11 @@ Existing apps have debt. The baseline is measured once, recorded in
 | `legal_gate.py sign <app> --by NAME --role owner\|lawyer [--accept-risk WHY]` | **a person, in a terminal** | appends one line to `docs/legal/signoff.jsonl`, bound to the hash of `docs/legal/` |
 
 `sign` refuses to run without an interactive terminal and asks the signer to type the app's
-folder name, so an agent's shell cannot record a sign-off; `install.sh` also adds a deny rule for
-it to the app's `.claude/settings.json`. The hash covers every file under `docs/legal/` except
+folder name. The terminal is checked inside `sign`, so neither an agent's shell nor a script
+that imports `legal_gate` can record a sign-off through it; `install.sh` also adds deny rules to
+the app's `.claude/settings.json` for the command and for edits of `signoff.jsonl` (the Edit and
+Write tools, a shell redirect or `tee`). A permission pattern cannot catch every shell spelling,
+so a line appended by hand is not detectable by the gate: git history shows who committed it. The hash covers every file under `docs/legal/` except
 `signoff.jsonl`: editing any of them after signing makes the sign-off stale. Tier `internal` needs
 no sign-off; an unset tier fails; `public` needs `register.md`, `licences.md`, `privacy.md` and
 `name.md` present before it can be signed, `commercial` and `client` also `terms.md`. An open `- [ ] LAWYER:` line in `docs/legal/register.md` needs

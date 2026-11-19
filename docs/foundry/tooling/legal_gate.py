@@ -8,8 +8,11 @@
 
 The tier comes from `tier:` under `## Distribution` in docs/foundry/app-context.md. A sign-off is
 one line in docs/legal/signoff.jsonl, bound to a hash of every other file under docs/legal/, so
-any later edit to the pack makes it stale. `sign` needs an interactive terminal and a typed
-confirmation: it is run by the owner or a lawyer, never by an agent.
+any later edit to the pack makes it stale. `sign` needs an interactive terminal (checked inside
+`sign`, not taken from the caller) and a typed confirmation: it is run by the owner or a lawyer,
+never by an agent. This stops an agent's shell and an import of this module; it cannot stop a
+process that appends to signoff.jsonl itself. The app's .claude/settings.json denies agents both
+the command and edits of that file, and git history shows who committed each line.
 Stdlib only. Reads the app; `sign` writes only docs/legal/signoff.jsonl.
 """
 from __future__ import annotations
@@ -170,11 +173,21 @@ def _commit(app: Path) -> str | None:
         return None
 
 
+def _at_terminal() -> bool:
+    """True only when this process's stdin and stdout are a terminal. `sign` checks it itself, so a
+    caller that imports this module cannot claim a terminal by passing `interactive=True`."""
+    try:
+        return sys.stdin.isatty() and sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
 def sign(app: Path, by: str, role: str, scope: str = "", accept_risk: str = "",
          interactive: bool = False, confirm=input, now: datetime | None = None) -> dict:
     """Append a sign-off for the pack as it is now. Raises PermissionError unless a person is at
-    a terminal and types the app's folder name; ValueError when there is nothing valid to sign."""
-    if not interactive:
+    a terminal and types the app's folder name; ValueError when there is nothing valid to sign.
+    `interactive` can only refuse: the terminal itself is checked here, whatever the caller says."""
+    if not (interactive and _at_terminal()):
         raise PermissionError("a sign-off is recorded by a person in a terminal, never by an agent or a script")
     if role not in ROLES:
         raise ValueError(f"role must be one of {', '.join(ROLES)}")
