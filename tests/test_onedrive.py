@@ -244,6 +244,36 @@ def test_overlapping_refreshes_use_the_rotated_token(monkeypatch):
     assert cloud_quota.load_tokens()[KEY]["refresh_token"] == "rt-3"
 
 
+def test_store_refresh_token_never_recreates_a_removed_account():
+    _stored("rt-old")
+    cloud_quota.disconnect(KEY)
+    cloud_quota._store_refresh_token(KEY, "rt-new")
+    assert KEY not in cloud_quota.load_tokens()
+    assert not cloud_quota.is_connected(KEY)
+
+
+def test_disconnect_mid_refresh_stays_disconnected(monkeypatch):
+    """Review P2-1: a refresh in flight must not bring back a token the owner just removed."""
+    _save_client_id()
+    _stored("rt-old")
+    seen = {}
+
+    def fake_post(url, data=None, **k):
+        t = threading.Thread(target=cloud_quota.disconnect, args=(KEY,))
+        t.start()
+        t.join(0.3)
+        seen["disconnect_waited"] = t.is_alive()  # blocked on the account's refresh lock
+        seen["thread"] = t
+        return Resp(200, {"access_token": "at", "refresh_token": "rt-new"})
+    monkeypatch.setattr(cloud_quota.requests, "post", fake_post)
+    cloud_quota._onedrive_access_token(KEY)
+    seen["thread"].join(5)
+    assert seen["disconnect_waited"] is True
+    assert KEY not in cloud_quota.load_tokens()
+    assert not cloud_quota.is_connected(KEY)
+    assert cloud_quota.load_tokens()["other"]["refresh_token"] == "g"
+
+
 # ---------------------------------------------------------------------------- quota
 def _quota(monkeypatch, status, body):
     _save_client_id()

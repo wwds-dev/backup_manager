@@ -151,10 +151,13 @@ def _set_token_entry(account_key, entry):
 
 
 def _store_refresh_token(account_key, new_token):
-    """Store a rotated refresh token for an existing account, keeping its other fields."""
+    """Store a rotated refresh token for an existing account, keeping its other fields.
+    An account removed meanwhile stays removed: nothing is written for it."""
     with _TOKENS_LOCK:
         tokens = load_tokens()
-        entry = dict(tokens.get(account_key) or {})
+        if account_key not in tokens:
+            return
+        entry = dict(tokens[account_key])
         entry["refresh_token"] = new_token
         tokens[account_key] = entry
         save_tokens(tokens)
@@ -200,7 +203,9 @@ def remove_manual_account(key):
 
 
 def disconnect(account_key):
-    with _TOKENS_LOCK:
+    # The account's refresh lock first (same order as a refresh: refresh lock, then
+    # tokens lock), so a refresh in flight finishes before the entry is removed.
+    with _refresh_lock(account_key), _TOKENS_LOCK:
         tokens = load_tokens()
         tokens.pop(account_key, None)
         save_tokens(tokens)
