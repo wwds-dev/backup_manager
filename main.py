@@ -1346,8 +1346,7 @@ def _append_quota_sample(account_key: str, used: int, total: int,
     samples = samples[-_QUOTA_HISTORY_MAX:]
     history[account_key] = samples
     try:
-        cloud_quota.SECRETS_DIR.mkdir(parents=True, exist_ok=True)
-        _QUOTA_HISTORY_FILE.write_text(json.dumps(history))
+        cloud_quota._write_json_atomic(_QUOTA_HISTORY_FILE, history)
     except OSError:
         pass
 

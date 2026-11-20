@@ -294,6 +294,34 @@ P3-6 (quota history written 0644, non-atomic); P3-7 needs no change. Review P3-2
 (double history read) also stay open. Not verified: Google's acceptance of PKCE for the Desktop client
 type (no live sign-in).
 
+## Secure follow-up fix log (2026-11-20, P3-4, P3-5, P3-6)
+
+P2-1, P2-2, P2-3, P3-1, P3-2 were already fixed above (`af48bb6`..`fdbf6ad`); this session found them on the
+branch and added only the rest. Tests first (`tests/test_secure_followups.py`).
+
+| Finding | Fix | Test (mutant killed) |
+|---|---|---|
+| P3-4 | `_set_token_entry` takes the account refresh lock before the tokens lock | blocks while a refresh holds the lock (lock removed) |
+| P3-5 | `used` clamped to >= 0 in Google, Dropbox and OneDrive quota | negative `used` gives 0 (each clamp removed, 3 mutants) |
+| P3-6 | `main._append_quota_sample` writes via `_write_json_atomic` (0600, folder 0700) | writer called, file 0600, folder 0700 (plain `write_text`) |
+
+Suite: tests=514, failures=0, errors=0, skipped=1 (JUnit XML). Still open: P3-3 (disconnect can block the UI
+up to ~20 s), review P3-2 and P3-3.
+
+## Secure re-check fix log (2026-11-20, R-1, R-2, R-3, from the Secure re-check of b0d4d32)
+
+Report: `docs/audit/more-storage-providers-secure-recheck.md` on `claude/blissful-dewdney-1f30cb`. Tests first
+(`tests/test_oauth_hardening.py`).
+
+| Finding | Fix | Test (mutant killed) |
+|---|---|---|
+| R-1 | `_wait_for_redirect` claims the response under the lock with a `claimed` flag, before answering; `done` is only the signal | a second request while `done` is slow cannot overwrite the first (deterministic; old `done.is_set()` check killed); 12 concurrent requests store exactly one |
+| R-2 | `_wait_for_redirect(port, timeout, state=)`: with a state, only a request carrying it (`compare_digest` on bytes) is claimed; others get 404 and the wait continues. The three connect functions pass their state | no/wrong/non-ASCII state and a bare `error=` do not end the wait, the real one does (check removed, 2 mutants); each provider passes its state |
+| R-3 | `total` clamped to >= 0 in Google and Dropbox | negative total gives 0 (both clamps removed) |
+
+Without a state (direct callers, older tests) the listener behaves as before. A timeout still reports
+"No authorization code received". Suite: tests=520, failures=0, errors=0, skipped=1 (JUnit XML).
+
 ## Verify-gap fix log (2026-11-20, Build follow-up for the second Verify pass at 2084ec2)
 Test-first, loopback sockets only, no provider call.
 - **G1** `test_listener_binds_loopback_only`: mutant `("0.0.0.0", port)` at the bind line FAILS it (restored).

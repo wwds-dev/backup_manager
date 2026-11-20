@@ -146,7 +146,9 @@ def save_tokens(data):
 
 
 def _set_token_entry(account_key, entry):
-    with _TOKENS_LOCK:
+    # Account refresh lock first (same order as disconnect and a refresh), so a refresh in
+    # flight cannot store its rotated old-grant token over the one a new sign-in just saved.
+    with _refresh_lock(account_key), _TOKENS_LOCK:
         tokens = load_tokens()
         tokens[account_key] = entry
         save_tokens(tokens)
@@ -249,13 +251,15 @@ def _close_active_server():
             _active_server = None
 
 
-def _wait_for_redirect(port, timeout=180):
+def _wait_for_redirect(port, timeout=180, state=None):
     global _active_server
     _close_active_server()
 
     result = {}
     done = threading.Event()
     claim = threading.Lock()
+    claimed = False
+    want = state.encode() if state is not None else None
 
     class Handler(http.server.BaseHTTPRequestHandler):
         timeout = _REDIRECT_REQUEST_TIMEOUT
@@ -267,9 +271,20 @@ def _wait_for_redirect(port, timeout=180):
             if "code" not in query and "error" not in query:
                 self.send_error(404)
                 return
+            # With an expected state, only the response that carries it is the sign-in
+            # response; a request with a missing or wrong one (a probe, a page) is 404 and
+            # cannot cancel the wait.
+            if want is not None:
+                got = (query.get("state") or [""])[0].encode("utf-8", "replace")
+                if not secrets.compare_digest(got, want):
+                    self.send_error(404)
+                    return
+            # Claim under the lock, before answering: exactly one response is ever stored.
+            nonlocal claimed
             with claim:
-                first = not done.is_set()
+                first = not claimed
                 if first:
+                    claimed = True
                     result.update(query)
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
@@ -316,7 +331,7 @@ def google_connect(account_key):
         "state": state,
     }
     webbrowser.open(f"{GOOGLE_AUTH_URL}?{urllib.parse.urlencode(params)}")
-    code, error = _redirect_code(_wait_for_redirect(REDIRECT_PORT), state)
+    code, error = _redirect_code(_wait_for_redirect(REDIRECT_PORT, state=state), state)
     if error:
         return False, error
 
@@ -365,8 +380,8 @@ def google_quota(account_key):
     )
     resp.raise_for_status()
     quota = resp.json().get("storageQuota", {})
-    used = int(quota.get("usage", 0))
-    total = int(quota["limit"]) if "limit" in quota else None  # unlimited plans omit it
+    used = max(int(quota.get("usage", 0)), 0)
+    total = max(int(quota["limit"]), 0) if "limit" in quota else None  # unlimited plans omit it
     drive = int(quota["usageInDrive"]) if "usageInDrive" in quota else None
     trash = int(quota["usageInDriveTrash"]) if "usageInDriveTrash" in quota else None
     return Quota(used, total, drive=drive, trash=trash)
@@ -401,7 +416,7 @@ def dropbox_connect(account_key):
         "state": state,
     }
     webbrowser.open(f"{DROPBOX_AUTH_URL}?{urllib.parse.urlencode(params)}")
-    code, error = _redirect_code(_wait_for_redirect(REDIRECT_PORT), state)
+    code, error = _redirect_code(_wait_for_redirect(REDIRECT_PORT, state=state), state)
     if error:
         return False, error
 
@@ -467,13 +482,13 @@ def dropbox_quota(account_key):
     )
     resp.raise_for_status()
     data = resp.json()
-    used = int(data.get("used", 0))
+    used = max(int(data.get("used", 0)), 0)
     allocation = data.get("allocation", {})
     total = allocation.get("allocated")
     if total is None:
         # team allocations nest it differently
         total = allocation.get("team", {}).get("allocated")
-    return used, (int(total) if total is not None else None)
+    return used, (max(int(total), 0) if total is not None else None)
 
 
 # ----------------------------------------------------------------------------
@@ -529,7 +544,7 @@ def onedrive_connect(account_key):
         "state": state,
     }
     webbrowser.open(f"{ONEDRIVE_AUTH_URL}?{urllib.parse.urlencode(params)}")
-    code, error = _redirect_code(_wait_for_redirect(REDIRECT_PORT), state)
+    code, error = _redirect_code(_wait_for_redirect(REDIRECT_PORT, state=state), state)
     if error:
         return False, error
 
@@ -585,7 +600,7 @@ def onedrive_quota(account_key):
     )
     resp.raise_for_status()
     q = resp.json().get("quota") or {}
-    used = int(q.get("used", 0))
+    used = max(int(q.get("used", 0)), 0)
     # Only an absent key means "no limit" (None). A total of 0, or one that is not a
     # positive number, is "not reported" (0): never shown as an unlimited plan.
     total = None
