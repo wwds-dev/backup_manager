@@ -1688,7 +1688,8 @@ class StorageTile(QFrame):
         layout.setSpacing(6)
 
         if provider_override:
-            provider = "Google Drive" if provider_override == "google" else "Dropbox"
+            reg = cloud_quota.PROVIDERS.get(provider_override)
+            provider = reg.label if reg else provider_override
             account = display_account or ""
         else:
             provider, account = split_tile_name(name)
@@ -1892,11 +1893,10 @@ class StorageTile(QFrame):
             email = None
             if cancel.is_set():
                 return token, None, None, "cancelled"
-            if provider == "dropbox":
-                try:
-                    email = cloud_quota.dropbox_account_email(key)
-                except Exception:
-                    email = None
+            try:
+                email = cloud_quota.account_email(provider, key)
+            except Exception:
+                email = None
             if cancel.is_set():
                 return token, email, None, "cancelled"
             try:
@@ -2253,24 +2253,24 @@ class CloudAccountsDialog(QDialog):
         self.resize(560, 460)
         layout = QVBoxLayout(self)
 
+        names = " / ".join(p.label for p in cloud_quota.quota_providers())
         layout.addWidget(QLabel(
-            "Connect Google Drive / Dropbox accounts to show their real storage\n"
+            f"Connect {names} accounts to show their real storage\n"
             "quota instead of local disk free space. Requires a one-time OAuth app\n"
             "(see README) — paste its Client ID/Secret or App Key/Secret below."
         ))
 
         creds = cloud_quota.load_app_credentials()
         form = QFormLayout()
-        self.google_id = QLineEdit(creds.get("google", {}).get("client_id", ""))
-        self.google_secret = QLineEdit(creds.get("google", {}).get("client_secret", ""))
-        self.google_secret.setEchoMode(QLineEdit.Password)
-        self.dropbox_key = QLineEdit(creds.get("dropbox", {}).get("app_key", ""))
-        self.dropbox_secret = QLineEdit(creds.get("dropbox", {}).get("app_secret", ""))
-        self.dropbox_secret.setEchoMode(QLineEdit.Password)
-        form.addRow("Google Client ID:", self.google_id)
-        form.addRow("Google Client Secret:", self.google_secret)
-        form.addRow("Dropbox App Key:", self.dropbox_key)
-        form.addRow("Dropbox App Secret:", self.dropbox_secret)
+        # (provider key, credential field) -> QLineEdit, built from the registry
+        self.cred_edits = {}
+        for p in cloud_quota.PROVIDERS.values():
+            for field, label, secret in p.credential_fields:
+                edit = QLineEdit(creds.get(p.key, {}).get(field, ""))
+                if secret:
+                    edit.setEchoMode(QLineEdit.Password)
+                form.addRow(label, edit)
+                self.cred_edits[(p.key, field)] = edit
         layout.addLayout(form)
 
         save_btn = secondary_button("Save credentials")
@@ -2295,16 +2295,10 @@ class CloudAccountsDialog(QDialog):
         layout.addLayout(close_row)
 
     def save_credentials(self):
-        cloud_quota.save_app_credentials({
-            "google": {
-                "client_id": self.google_id.text().strip(),
-                "client_secret": self.google_secret.text().strip(),
-            },
-            "dropbox": {
-                "app_key": self.dropbox_key.text().strip(),
-                "app_secret": self.dropbox_secret.text().strip(),
-            },
-        })
+        creds = cloud_quota.load_app_credentials()
+        for (provider, field), edit in self.cred_edits.items():
+            creds.setdefault(provider, {})[field] = edit.text().strip()
+        cloud_quota.save_app_credentials(creds)
         self.status_lbl.setText("Saved.")
 
     def _add_row(self, label_text, name, provider, removable=False):
@@ -2413,8 +2407,8 @@ class AddAccountDialog(QDialog):
 
         form = QFormLayout()
         self.provider_combo = QComboBox()
-        self.provider_combo.addItem("Google Drive", "google")
-        self.provider_combo.addItem("Dropbox", "dropbox")
+        for p in cloud_quota.quota_providers():
+            self.provider_combo.addItem(p.label, p.key)
         self.label_edit = QLineEdit()
         self.label_edit.setPlaceholderText("e.g. work.account@gmail.com")
         form.addRow("Provider:", self.provider_combo)

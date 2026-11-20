@@ -32,6 +32,7 @@ import secrets
 import threading
 import urllib.parse
 import webbrowser
+from dataclasses import dataclass
 from pathlib import Path
 
 import requests
@@ -390,31 +391,79 @@ def dropbox_quota(account_key):
 
 
 # ----------------------------------------------------------------------------
-# Dispatch
+# Provider registry. One entry per provider; the app's provider lists, credential
+# form, mount detection and dispatch all read it. URLs are literals here and are
+# the only URLs the app opens for a provider (never one from an API response).
+# Functions are looked up by name at call time so tests can patch them.
 # ----------------------------------------------------------------------------
+@dataclass(frozen=True)
+class Provider:
+    key: str
+    label: str
+    mount_prefix: str | None  # CloudStorage folder name prefix, case-insensitive
+    web_url: str
+    # (field in app_credentials.json, form label, is_secret)
+    credential_fields: tuple = ()
+    connect: str | None = None  # function names in this module
+    quota: str | None = None
+    account_email: str | None = None
+    has_quota: bool = True
+
+
+PROVIDERS = {
+    "google": Provider(
+        "google", "Google Drive", "GoogleDrive", "https://drive.google.com/",
+        credential_fields=(("client_id", "Google Client ID:", False),
+                           ("client_secret", "Google Client Secret:", True)),
+        connect="google_connect", quota="google_quota",
+    ),
+    "dropbox": Provider(
+        "dropbox", "Dropbox", "Dropbox", "https://www.dropbox.com/home",
+        credential_fields=(("app_key", "Dropbox App Key:", False),
+                           ("app_secret", "Dropbox App Secret:", True)),
+        connect="dropbox_connect", quota="dropbox_quota",
+        account_email="dropbox_account_email",
+    ),
+}
+
+
+def _call(func_name, *args):
+    return globals()[func_name](*args)
+
+
+def quota_providers():
+    """Providers whose account quota can be read, in registry order."""
+    return [p for p in PROVIDERS.values() if p.has_quota and p.connect]
+
+
 def provider_for_name(name):
     lower = name.lower()
-    if lower.startswith("googledrive"):
-        return "google"
-    if lower.startswith("dropbox"):
-        return "dropbox"
+    for p in PROVIDERS.values():
+        if p.mount_prefix and lower.startswith(p.mount_prefix.lower()):
+            return p.key
     return None
 
 
 def connect(provider, account_key):
-    if provider == "google":
-        return google_connect(account_key)
-    if provider == "dropbox":
-        return dropbox_connect(account_key)
-    return False, f"Unknown provider: {provider}"
+    p = PROVIDERS.get(provider)
+    if p is None or not p.connect:
+        return False, f"Unknown provider: {provider}"
+    return _call(p.connect, account_key)
+
+
+def account_email(provider, account_key):
+    """The account's email where the provider has a call for it, else None."""
+    p = PROVIDERS.get(provider)
+    if p is None or not p.account_email:
+        return None
+    return _call(p.account_email, account_key)
 
 
 def quota(account_key):
     entry = load_tokens().get(account_key)
     if not entry:
         return None
-    if entry["provider"] == "google":
-        return google_quota(account_key)
-    if entry["provider"] == "dropbox":
-        return dropbox_quota(account_key)
-    return None
+    p = PROVIDERS.get(entry.get("provider"))
+    if p is None or not p.quota:
+        return None
+    return _call(p.quota, account_key)
