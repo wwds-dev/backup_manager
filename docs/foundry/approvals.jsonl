@@ -12,3 +12,4 @@
 {"ts": "2026-11-20T14:25:43", "gate": "release", "by": "owner", "words": "Build and install the app", "recorded_by": "agent", "spec": "lab-root-checks"}
 {"ts": "2026-11-20T14:24:22", "gate": "define", "by": "owner", "words": "Yes, add logging", "recorded_by": "agent", "spec": "icloud-unavailable", "note": "Owner's yes to: log du rc/stderr from the app and accept a partial total when du printed one"}
 {"ts": "2026-11-20T14:41:14", "gate": "define", "by": "owner", "words": "Approve", "recorded_by": "agent", "spec": "more-storage-providers"}
+{"ts": "2026-11-20T14:42:14", "gate": "architect", "by": "owner", "words": "Approve", "recorded_by": "agent", "spec": "more-storage-providers"}
