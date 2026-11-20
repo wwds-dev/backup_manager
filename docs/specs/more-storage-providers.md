@@ -308,6 +308,20 @@ branch and added only the rest. Tests first (`tests/test_secure_followups.py`).
 Suite: tests=514, failures=0, errors=0, skipped=1 (JUnit XML). Still open: P3-3 (disconnect can block the UI
 up to ~20 s), review P3-2 and P3-3.
 
+## Secure re-check fix log (2026-11-20, R-1, R-2, R-3, from the Secure re-check of b0d4d32)
+
+Report: `docs/audit/more-storage-providers-secure-recheck.md` on `claude/blissful-dewdney-1f30cb`. Tests first
+(`tests/test_oauth_hardening.py`).
+
+| Finding | Fix | Test (mutant killed) |
+|---|---|---|
+| R-1 | `_wait_for_redirect` claims the response under the lock with a `claimed` flag, before answering; `done` is only the signal | a second request while `done` is slow cannot overwrite the first (deterministic; old `done.is_set()` check killed); 12 concurrent requests store exactly one |
+| R-2 | `_wait_for_redirect(port, timeout, state=)`: with a state, only a request carrying it (`compare_digest` on bytes) is claimed; others get 404 and the wait continues. The three connect functions pass their state | no/wrong/non-ASCII state and a bare `error=` do not end the wait, the real one does (check removed, 2 mutants); each provider passes its state |
+| R-3 | `total` clamped to >= 0 in Google and Dropbox | negative total gives 0 (both clamps removed) |
+
+Without a state (direct callers, older tests) the listener behaves as before. A timeout still reports
+"No authorization code received". Suite: tests=520, failures=0, errors=0, skipped=1 (JUnit XML).
+
 ## Verify-gap fix log (2026-11-20, Build follow-up for the second Verify pass at 2084ec2)
 Test-first, loopback sockets only, no provider call.
 - **G1** `test_listener_binds_loopback_only`: mutant `("0.0.0.0", port)` at the bind line FAILS it (restored).

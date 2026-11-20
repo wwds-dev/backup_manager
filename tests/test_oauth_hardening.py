@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import sys
 import urllib.parse
 
 import pytest
@@ -62,7 +63,7 @@ def _connect(monkeypatch, provider, *, state_override=None, token_resp=None):
         seen["auth_url"] = url
         return True
 
-    def fake_wait(port, timeout=180):
+    def fake_wait(port, timeout=180, state=None):
         q = urllib.parse.parse_qs(urllib.parse.urlparse(seen["auth_url"]).query)
         state = (q.get("state") or [""])[0] if state_override is None else state_override
         result = {"code": ["the-auth-code"]}
@@ -136,12 +137,12 @@ def _free_port():
         return s.getsockname()[1]
 
 
-def _start_wait(port, timeout):
+def _start_wait(port, timeout, state=None):
     """Run _wait_for_redirect in a thread; return (thread, box) once the port accepts."""
     box = {}
 
     def run():
-        box["result"] = cloud_quota._wait_for_redirect(port, timeout=timeout)
+        box["result"] = cloud_quota._wait_for_redirect(port, timeout=timeout, state=state)
         box["at"] = time.monotonic()
     t = threading.Thread(target=run, daemon=True)
     t.start()
@@ -395,3 +396,103 @@ def test_production_handler_timeout_is_short():
     # The test above patches the constant, so pin the shipped value: an idle connection must
     # be dropped within seconds, never minutes (a 600 s default would pass the patched test).
     assert 0 < cloud_quota._REDIRECT_REQUEST_TIMEOUT <= 10
+
+
+# ---------------------------------------------------------------------------- recheck R-1, R-2, R-3
+def test_state_mismatch_request_does_not_end_the_wait():
+    """R-2: a stray GET /?code=x (no or wrong state) must not cancel the real sign-in."""
+    port = _free_port()
+    t, box = _start_wait(port, timeout=10, state="good-state")
+    for bad in ("/?code=x", "/?code=x&state=wrong", "/?error=access_denied", "/?code=x&state=%FF%FE"):
+        assert b"404" in _get(port, bad).split(b"\r\n")[0]
+    time.sleep(0.2)
+    assert t.is_alive(), "a request with the wrong state ended the wait"
+    assert b"200" in _get(port, "/?code=real&state=good-state").split(b"\r\n")[0]
+    t.join(5)
+    assert box["result"]["code"] == ["real"]
+
+
+def test_matching_error_redirect_with_state_ends_the_wait():
+    port = _free_port()
+    t, box = _start_wait(port, timeout=10, state="st")
+    _get(port, "/?error=access_denied&state=st")
+    t.join(5)
+    assert box["result"]["error"] == ["access_denied"]
+
+
+def test_claim_is_atomic_under_concurrent_responses():
+    """R-1: of many simultaneous valid-looking responses exactly one is stored, never a merge."""
+    for _ in range(15):
+        port = _free_port()
+        t, box = _start_wait(port, timeout=10)  # no state: every code request qualifies
+        n = 12
+        barrier = threading.Barrier(n)
+
+        def hit(i):
+            barrier.wait()
+            try:
+                _get(port, f"/?code=c{i}&state=s{i}")
+            except OSError:
+                pass
+        ths = [threading.Thread(target=hit, args=(i,)) for i in range(n)]
+        [x.start() for x in ths]
+        [x.join(5) for x in ths]
+        t.join(5)
+        r = box["result"]
+        assert len(r["code"]) == 1 and len(r["state"]) == 1
+        assert r["code"][0][1:] == r["state"][0][1:], f"merged result {r}"
+
+
+def test_callers_pass_their_state_to_the_listener(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(cloud_quota.webbrowser, "open", lambda url: seen.setdefault("url", url))
+    monkeypatch.setattr(cloud_quota, "_wait_for_redirect",
+                        lambda port, timeout=180, state=None: seen.setdefault("state", state) and {})
+    cloud_quota.save_app_credentials({"google": {"client_id": "i", "client_secret": "s"},
+                                      "dropbox": {"app_key": "k", "app_secret": "s"},
+                                      "onedrive": {"client_id": "c"}})
+    for prov in ("google", "dropbox", "onedrive"):
+        seen.clear()
+        cloud_quota.connect(prov, KEY)
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(seen["url"]).query)
+        assert seen["state"] and seen["state"] == q["state"][0], prov
+
+
+def test_negative_total_clamped_google_and_dropbox(monkeypatch):
+    class R:
+        def __init__(self, d):
+            self.d = d
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self.d
+    cloud_quota._set_token_entry("g", {"refresh_token": "rt"})
+    monkeypatch.setattr(cloud_quota, "_google_access_token", lambda rt: "at")
+    monkeypatch.setattr(cloud_quota.requests, "get",
+                        lambda *a, **k: R({"storageQuota": {"usage": "1", "limit": "-9"}}))
+    assert tuple(cloud_quota.google_quota("g")) == (1, 0)
+    monkeypatch.setattr(cloud_quota, "_dropbox_access_token", lambda rt: "at")
+    monkeypatch.setattr(cloud_quota.requests, "post",
+                        lambda *a, **k: R({"used": 1, "allocation": {"allocated": -9}}))
+    assert cloud_quota.dropbox_quota("g") == (1, 0)
+
+
+def test_second_response_cannot_overwrite_the_first_even_when_done_is_slow(monkeypatch):
+    """R-1, deterministic: widen the gap between answering and signalling `done`; a second
+    request inside that gap must still lose the claim."""
+    real_event = threading.Event
+
+    class SlowSet(real_event):
+        def set(self):
+            if sys._getframe(1).f_code.co_name == "do_GET":  # only the handler's signal
+                time.sleep(0.4)
+            super().set()
+    monkeypatch.setattr(cloud_quota.threading, "Event", SlowSet)
+    port = _free_port()
+    t, box = _start_wait(port, timeout=10)
+    _get(port, "/?code=first&state=s1")
+    _get(port, "/?code=second&state=s2")  # arrives while the first is still signalling
+    t.join(5)
+    assert box["result"] == {"code": ["first"], "state": ["s1"]}

@@ -93,7 +93,7 @@ def _connect(monkeypatch, *, state_override=None, token_resp=None):
         seen["auth_url"] = url
         return True
 
-    def fake_wait(port, timeout=180):
+    def fake_wait(port, timeout=180, state=None):
         q = urllib.parse.parse_qs(urllib.parse.urlparse(seen["auth_url"]).query)
         state = q["state"][0] if state_override is None else state_override
         result = {"code": ["the-auth-code"]}
@@ -160,7 +160,7 @@ def test_redirect_with_error_param_is_reported(monkeypatch):
     _save_client_id()
     monkeypatch.setattr(cloud_quota.webbrowser, "open", lambda url: True)
     monkeypatch.setattr(cloud_quota, "_wait_for_redirect",
-                        lambda port, timeout=180: {"error": ["access_denied"]})
+                        lambda port, timeout=180, state=None: {"error": ["access_denied"]})
     ok, err = cloud_quota.connect("onedrive", KEY)
     assert not ok
 
