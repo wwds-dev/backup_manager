@@ -14,3 +14,4 @@
 {"ts": "2026-11-20T14:34:30", "gate": "define", "by": "owner", "words": "used of", "recorded_by": "agent", "spec": "tile-used-wording", "note": "Owner chose 'used of' wording for all storage tiles"}
 {"ts": "2026-11-20T14:41:14", "gate": "define", "by": "owner", "words": "Approve", "recorded_by": "agent", "spec": "more-storage-providers"}
 {"ts": "2026-11-20T14:42:14", "gate": "architect", "by": "owner", "words": "Approve", "recorded_by": "agent", "spec": "more-storage-providers"}
+{"ts": "2026-11-20T22:50:34", "gate": "release", "by": "owner", "words": "Approve release", "recorded_by": "agent", "spec": "more-storage-providers"}

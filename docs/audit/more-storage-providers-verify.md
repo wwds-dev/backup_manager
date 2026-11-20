@@ -423,6 +423,10 @@ Verdict: first-pass items (1) and (2) of the fourth-pass P3s are PASS (closed). 
 
 ## Fourth pass at e6ef87c (2026-11-20, Verify session charming-pare, fake HOME)
 
+---
+
+## Fourth pass at e6ef87c (2026-11-20)
+
 Scope: R1 (production handler timeout pinned) and R2 (main.py state paths isolated). All runs under a fake HOME, never the real one. **R1 PASS, R2 PASS, suite 509/0/0 (2 skipped, scratch checkout not beside the lab tree), real folder untouched by the runs, fake-home leak check clean.** Residual P3s: three conftest redirects (credentials, tokens, manual accounts) not mutation-covered by the isolation test; `WORKSPACE_REPORT` and `_SHOW_REQUEST_FILE` in `main.py` not redirected.
 
 
@@ -499,6 +503,7 @@ Real-HOME behaviour (deliberately never run); live GUI; the 2 skipped tests; whe
 ---
 
 ## Fifth pass at fa9cbb2 (2026-11-20, Verify session charming-pare, fake HOME)
+## Fifth pass at fa9cbb2 (2026-11-20)
 
 Scope: the two P3s of the fourth pass (credentials/tokens/manual-accounts redirects; workspace_report and show_request redirects). Fake HOME for every run. **PASS.** All five new redirects killed when removed (both layers or per-test layer); earlier four redirects no regression; suite 510/0/0, 2 skipped (checkout outside the lab tree), three runs; fake home empty after runs; real folder permission bits unchanged, only `state.json` changed (102 to 154 B at 21:05:42, most likely the running installed app; not attributable with certainty). Residual P3s: baseline-layer-only removal survives for all paths; the `_SHOW_REQUEST_FILE` test writes via `write_text` rather than the production writer (main.py:6136); `AUTOSYNC_STATE_DIR` (main.py:4956) is read-only and unredirected.
 
