@@ -286,3 +286,59 @@ def test_icloud_gauge_shows_denied_text(win):
     win.overview.refresh_gauges()
     g = win.overview.gauges["icloud"]
     assert "No access" in g.detail_lbl.text() and g.value_lbl.text() == "—"
+
+
+# --- iCloud du: log the outcome, accept a partial total (spec icloud-unavailable) ---
+
+def _fake_du(monkeypatch, tmp_path, rc, out, err):
+    monkeypatch.setattr(main.cloud_quota, "SECRETS_DIR", tmp_path)
+    monkeypatch.setattr(main, "run_cmd", lambda args, timeout=60: (rc, out, err))
+
+
+def test_icloud_bytes_ok_and_logged(monkeypatch, tmp_path):
+    _fake_du(monkeypatch, tmp_path, 0, "10\t/x\n", "")
+    assert main.icloud_local_bytes() == 10 * 1024
+    assert "rc=0" in (tmp_path / "icloud_du.log").read_text()
+
+
+def test_icloud_bytes_partial_total_when_du_errors(monkeypatch, tmp_path):
+    _fake_du(monkeypatch, tmp_path, 1, "4\t/x/a\n20\t/x\n", "du: /x/b: Operation not permitted\n")
+    n = main.icloud_local_bytes()
+    assert n == 20 * 1024 and isinstance(n, main.PartialBytes)
+    log = (tmp_path / "icloud_du.log").read_text()
+    assert "rc=1" in log and "Operation not permitted" in log and "/x/b" not in log
+    assert (tmp_path / "icloud_du.log").stat().st_mode & 0o077 == 0
+
+
+def test_icloud_bytes_single_line_rc1_is_partial(monkeypatch, tmp_path):
+    _fake_du(monkeypatch, tmp_path, 1, "64\t/x\n", "du: /x/b: Operation not permitted\n")
+    assert isinstance(main.icloud_local_bytes(), main.PartialBytes)
+
+
+def test_icloud_bytes_ok_is_not_partial(monkeypatch, tmp_path):
+    _fake_du(monkeypatch, tmp_path, 0, "10\t/x\n", "")
+    assert not isinstance(main.icloud_local_bytes(), main.PartialBytes)
+
+
+def test_icloud_bytes_timeout_and_garbage_are_none(monkeypatch, tmp_path):
+    _fake_du(monkeypatch, tmp_path, 1, "", "timed out after 30 seconds")
+    assert main.icloud_local_bytes() is None
+    assert "timed out" in (tmp_path / "icloud_du.log").read_text()
+    _fake_du(monkeypatch, tmp_path, 1, "garbage\n", "")
+    assert main.icloud_local_bytes() is None
+
+
+def test_icloud_tile_text_partial():
+    assert "at least" in _tile_text(main.PartialBytes(4096))
+    assert "at least" not in _tile_text(4096)
+
+
+def test_icloud_bytes_none_when_du_prints_nothing(monkeypatch, tmp_path):
+    _fake_du(monkeypatch, tmp_path, 1, "", "du: x: Operation not permitted\n")
+    assert main.icloud_local_bytes() is None
+    assert "rc=1" in (tmp_path / "icloud_du.log").read_text()
+
+
+def test_icloud_log_failure_never_breaks_measuring(monkeypatch, tmp_path):
+    _fake_du(monkeypatch, tmp_path / "no" / "such", 0, "5\t/x\n", "")
+    assert main.icloud_local_bytes() == 5 * 1024
