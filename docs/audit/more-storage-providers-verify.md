@@ -258,3 +258,80 @@ Scratch tests (deleted, not committed), `_redirect_code` direct plus full `conne
 - OneDrive through `connect()` with a bad state: my scratch harness lacked a OneDrive client id (returned "No OneDrive Client ID saved yet."), so only the shared `_redirect_code` (cloud_quota.py:490, used at :318, :403, :531) was checked for it.
 - Branch coverage of the changed lines was not re-run this pass (the change is one expression plus a fixture; both branches of the line are hit by the tests above).
 - No live provider calls, no real tokens (none used).
+
+
+---
+
+## Fourth pass at e6ef87c (2026-11-20)
+
+Scope: R1 (production handler timeout pinned) and R2 (main.py state paths isolated). All runs under a fake HOME, never the real one. **R1 PASS, R2 PASS, suite 509/0/0 (2 skipped, scratch checkout not beside the lab tree), real folder untouched by the runs, fake-home leak check clean.** Residual P3s: three conftest redirects (credentials, tokens, manual accounts) not mutation-covered by the isolation test; `WORKSPACE_REPORT` and `_SHOW_REQUEST_FILE` in `main.py` not redirected.
+
+
+Playbook last-reviewed 2026-10-14, status current (not stale). No model called (app-context Models used: None), live-eval item N/A.
+All Python ran with fake HOME (scratchpad/fakehome). Production code restored after every mutant; `git status` clean.
+
+### Verdict: PASS (R1, R2, suite, real folder, fake-home leak) with 3 low residuals
+
+| Item | Result |
+|---|---|
+| R1 production timeout pinned | PASS |
+| R2 main.py paths redirected | PASS (residuals below) |
+| Full suite x2 | PASS: 509 tests, 0 fail, 0 err, 2 skipped (expected 1, see note) |
+| Real folder untouched | PASS |
+| Fake-home leak check | PASS: Library folder empty after both full runs |
+
+### R1 (tests/test_oauth_hardening.py:392-397, cloud_quota.py:232, :260)
+New `test_production_handler_timeout_is_short`: `assert 0 < _REDIRECT_REQUEST_TIMEOUT <= 10`. Comment at :369 now says it kills `timeout = None` and any non-numeric value, the production default pinned separately: accurate (a constant patched to 0.3 cannot see 600).
+
+| Mutant (cloud_quota.py) | Result | Failing test |
+|---|---|---|
+| `_REDIRECT_REQUEST_TIMEOUT = 600` | KILLED | test_production_handler_timeout_is_short |
+| `= 11` | KILLED | same |
+| `= 0` | KILLED | same + test_first_sign_in_response_wins_over_a_later_one |
+| `= None` | KILLED | same |
+| ignore constant (`timeout = 600` at :260) | KILLED | test_silent_connection_is_closed_after_the_handler_timeout (G2) |
+| Handler `timeout = None` (:260) | KILLED | G2 test (no regression) |
+| bind `0.0.0.0` (:286) | KILLED | test_listener_binds_loopback_only (no regression) |
+
+Boundary note: 10 is accepted, 11 killed; fine.
+
+### R2 (tests/conftest.py:14-23, tests/test_secrets_isolation.py)
+Redirected (both a session baseline and per-test layer): cloud_quota SECRETS_DIR, CREDENTIALS_FILE, TOKENS_FILE, MANUAL_ACCOUNTS_FILE; main _STATE_FILE (main.py:1200), _QUOTA_HISTORY_FILE (:1297), _INSTANCE_LOCK_FILE (:6036). icloud_du.log (main.py:924), env_last_use.json and env_records (lab_health.py:637, :827), backup_records and worktree_records (derived from records_dir) follow SECRETS_DIR at call time, so they are covered.
+NOT redirected (module constants built from the live folder at import):
+- main.WORKSPACE_REPORT (main.py:1262, written at :3728 by a UI action)
+- main._SHOW_REQUEST_FILE (main.py:6053; written :6136, unlinked :5704/5755)
+- main.AUTOSYNC_STATE_DIR (main.py:4956, ~/Library/Application Support/git_autosync, default argument, read path)
+- main.BACKUP_DIR/LOG_DIR (~/Documents/lab/_Admin/backup, read-only globbing)
+No test in the full suite wrote any of them (fake Library empty), so no leak today; they are latent for a future test.
+
+Mutation (remove one redirect line from conftest, run test_secrets_isolation.py):
+| Removed | Result |
+|---|---|
+| SECRETS_DIR | KILLED |
+| _STATE_FILE | KILLED (state.json outside test folder) |
+| _QUOTA_HISTORY_FILE | KILLED |
+| _INSTANCE_LOCK_FILE | KILLED |
+| per-test layer entirely | KILLED |
+| CREDENTIALS_FILE | SURVIVED |
+| TOKENS_FILE | SURVIVED |
+| MANUAL_ACCOUNTS_FILE | SURVIVED |
+For the three survivors I ran the whole suite with each redirect removed: 509 pass, nothing written to the fake home, so no current test writes them unpatched (many tests patch TOKENS_FILE themselves). The isolation test does not assert these three; low gap.
+
+Per-test patch still works: 10+ existing tests patch SECRETS_DIR/_STATE_FILE/_QUOTA_HISTORY_FILE/TOKENS_FILE themselves (e.g. test_overdue_cooldown.py:22, test_tile_links.py:32-36); all pass. Baseline fallback: session scope, `mp.undo()` at end; points at a mktemp folder, not shared with per-test dirs; per-test layer is function-scoped so state does not carry between tests (state.json lives in each test's tmp_path). Not over-broad: no test asserts the default path (grep "Application Support" in tests: none), so no real test of path code is masked. `import main` at conftest import time is the only side effect (Qt offscreen already required).
+
+### Suite (JUnit XML k1.xml, k2.xml)
+Run 1 and 2 identical: tests=509 failures=0 errors=0 skipped=2; exit 139 (known Qt teardown). Skips: test_appkit_guard.py:110 "lab_hub checkout not beside this repo", test_backup_filter.py:322 "_Admin/backup scripts not on this machine". Both are environment skips; the scratch checkout is not beside the lab tree, so 2 not 1 here (the 1-skip figure came from a different location). Not a regression.
+Tests diff vs f050c9d: additions (test_secrets_isolation.py new, +1 test in test_oauth_hardening.py) and edits to two non-assertion lines: the conftest docstring/fixture and the G2 comment (test_oauth_hardening.py:369). No existing assertion changed or removed.
+
+### Real folder (baseline mtimes_before3.txt / perms_before3.txt)
+- mtime/size diff: only icloud_du.log and quota_history.json mtime changed (same sizes), +300 s apart exactly (1795207886 -> 1795208186 / 1795207887 -> 1795208187), the running app's 5-minute quota sample. state.json unchanged (1795207386, 102 B). No files added/removed.
+- Permissions: baseline was top-level only (12 lines); 0 baseline lines changed or missing in the recursive after-list; all file modes in after-list unchanged (credentials/tokens 0600).
+- I only read the folder. Not verified: that the app, not my runs, wrote those two files (inferred from the 300 s cadence and the fact that every run used the fake HOME).
+
+### Not verified
+Real-HOME behaviour (deliberately never run); live GUI; the 2 skipped tests; whether the `0 < t <= 10` bound is the right product value (spec says seconds).
+
+### Ranked gaps
+1. P3: test_secrets_isolation.py does not assert CREDENTIALS_FILE, TOKENS_FILE, MANUAL_ACCOUNTS_FILE (3 conftest mutants survive).
+2. P3: WORKSPACE_REPORT and _SHOW_REQUEST_FILE are not redirected (latent leak for a future test).
+3. P4: skip count depends on checkout location (2 here, 1 beside lab tree).
