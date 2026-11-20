@@ -64,3 +64,7 @@
 {"ts": "2026-11-20T17:32:34", "phase": "build", "state": "start", "spec": "more-storage-providers"}
 {"ts": "2026-11-20T17:35:03", "phase": "build", "state": "done", "spec": "more-storage-providers"}
 {"ts": "2026-11-20T18:50:55", "phase": "document", "state": "done", "spec": "more-storage-providers"}
+{"ts": "2026-11-20T18:48:38", "phase": "review", "state": "start", "spec": "icloud-unavailable"}
+{"ts": "2026-11-20T18:48:38", "phase": "verify", "state": "start", "spec": "icloud-unavailable"}
+{"ts": "2026-11-20T18:50:44", "phase": "review", "state": "done", "spec": "icloud-unavailable"}
+{"ts": "2026-11-20T19:01:15", "phase": "verify", "state": "done", "spec": "icloud-unavailable"}
