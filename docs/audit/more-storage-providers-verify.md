@@ -381,3 +381,39 @@ Coverage of changed lines: not measured (no coverage tool configured); the mutat
 3. P3: a conftest-level `import main` makes an import failure in main.py fail the entire suite (informational).
 
 Overall: R1 and R2 PASS; no P0/P1/P2 open.
+
+## Fifth pass at fa9cbb2 (QA engineer)
+Playbook `docs/playbooks/qa-engineer.md`: status current, last-reviewed 2026-10-14 (not stale). Every run used a scratch HOME (`$S/fakehome`, `echo $HOME` checked); mutations were made in a detached `git archive HEAD` copy, the worktree is untouched apart from this file.
+
+### Mutation table (conftest `_redirect` edited in the scratch copy; `pytest tests/test_secrets_isolation.py`)
+| Redirect removed / changed | per-test layer only | session layer only | both | wrong file name (both layers) |
+|---|---|---|---|---|
+| CREDENTIALS_FILE | killed | SURVIVES | killed | SURVIVES |
+| TOKENS_FILE | killed | SURVIVES | killed | SURVIVES |
+| MANUAL_ACCOUNTS_FILE | killed | SURVIVES | killed | SURVIVES |
+| WORKSPACE_REPORT | killed | SURVIVES | killed | SURVIVES |
+| _SHOW_REQUEST_FILE | killed | SURVIVES | killed | SURVIVES |
+Killed by `test_every_secrets_and_state_writer_lands_in_the_test_folder` each time. P3 (1) of the fourth pass is closed: all 5 paths are guarded in the per-test layer and in both.
+Survivors:
+- Session-only removal (5): the per-test layer masks it while a test runs, so the test cannot see the session layer. Not a gap for the live folder while the per-test layer holds; it is the residual P3 "session layer is unguarded" (it only matters for a worker thread outliving its test).
+- Wrong file name (5): the test checks the folder, not the name, so a mis-named redirect inside scratch passes. Harmless for safety (still scratch); a P3 test-precision gap, fix by asserting `p.name` or the expected path.
+Side effect: the "both" mutants wrote 5 files into the scratch live folder, which is the expected proof the leak is real without the redirects; folder emptied before the suite.
+
+### Test quality
+- The new test calls the real writers: `cloud_quota.save_app_credentials/save_tokens/save_manual_accounts`, `workspace_extra.write_report(..., main.WORKSPACE_REPORT)`, and `main._SHOW_REQUEST_FILE.write_text` (the last is a direct write, not production code, so it proves the path only, not the production writer in main.py ~6053-6059). Asserts existence and `tmp_path in resolve().parents`; can fail (mutants killed).
+- Other import-time paths: all derived from `cloud_quota.SECRETS_DIR` at import in main.py are redirected (_STATE_FILE 1200, WORKSPACE_REPORT 1262, _QUOTA_HISTORY_FILE 1297, _INSTANCE_LOCK_FILE 6036, _SHOW_REQUEST_FILE 6053). Call-time uses (main.py 924, 1213, 1324, 5703-5705, 6059, 6135; lab_health.py 46, 637, 827, 1119) read `cloud_quota.SECRETS_DIR` and so follow the patch. Not under SECRETS_DIR: `main.AUTOSYNC_STATE_DIR` (main.py 4956, HOME-derived `git_autosync`), read-only via `autosync_state` (not verified that no test writes it). No unredirected SECRETS_DIR-derived path found.
+- Stability: test_oauth_hardening.py + test_secrets_isolation.py x5: 46 passed each, 0 failures.
+
+### Full suite (scratch HOME, `QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q -p no:warnings --junitxml=...`, scratch tree at fa9cbb2)
+| Run | tests | failures | errors | skipped | exit | files left in fake live folder |
+|---|---|---|---|---|---|---|
+| 1 | 510 | 0 | 0 | 2 | 139 (known Qt teardown crash) | 0 |
+| 2 | 510 | 0 | 0 | 2 | 139 | 0 |
+Real HOME was not used. Coverage and model-calling checks: not applicable / not measured, as in earlier passes.
+
+### Ranked gaps
+1. P3: wrong-name redirects survive; assert the file names.
+2. P3: session layer is not observable by any test (session-only removals survive); optional, a pytester/subprocess test.
+3. P3: `_SHOW_REQUEST_FILE` is exercised by a direct write_text, not the production writer.
+
+Verdict: first-pass items (1) and (2) of the fourth-pass P3s are PASS (closed). No P0/P1/P2 open. Overall PASS.
