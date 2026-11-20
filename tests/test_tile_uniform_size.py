@@ -94,3 +94,24 @@ def test_no_text_is_clipped(qapp, width):
                              if c.parent() is t and not c.isHidden())
         assert content_bottom <= t.height(), (content_bottom, t.height())
     host.close()
+
+
+def test_account_date_is_always_on_its_own_line_below_the_email(qapp):
+    """macOS appends " (DD-MM-YYYY HH:MM)" to a re-created account folder; it must never
+    sit on the email's line, however long the email is."""
+    cases = {
+        "sapio1337@proton.me (21-10-2026 23:38)": "sapio1337@proton.me\n(21-10-2026 23:38)",
+        "a-very-long-address.with.parts@example-provider.com (22-06-2026 22:10)":
+            "a-very-long-address.with.parts@example-provider.com\n(22-06-2026 22:10)",
+        "opaque1337@proton.me": "opaque1337@proton.me",
+        "": "",
+    }
+    for raw, shown in cases.items():
+        assert main.account_display(raw) == shown
+    tile = main.StorageTile("Proton Drive x", None, True, provider_override="proton",
+                            display_account="sapio1337@proton.me (21-10-2026 23:38)",
+                            quota_only=True)
+    host, _flow = _row(qapp, [tile], 400)
+    first, second = tile.account_lbl.text().split("\n")
+    assert first == "sapio1337@proton.me" and second == "(21-10-2026 23:38)"
+    host.close()

@@ -1015,6 +1015,16 @@ def split_tile_name(name):
     return name, ""
 
 
+_ACCOUNT_STAMP = re.compile(r"^(.*?)\s*(\(\d{2}-\d{2}-\d{4} \d{2}:\d{2}\))$")
+
+
+def account_display(account):
+    """Tile account line: the email, and the "(DD-MM-YYYY HH:MM)" date macOS appends to a
+    re-created account folder always on its own line below it."""
+    m = _ACCOUNT_STAMP.match(account or "")
+    return f"{m.group(1)}\n{m.group(2)}" if m and m.group(1) else (account or "")
+
+
 def disk_usage_for(path):
     """Free/total/used for the filesystem backing `path`, or None if unavailable."""
     try:
@@ -1733,7 +1743,7 @@ class StorageTile(QFrame):
         top.addWidget(status_lbl)
         layout.addLayout(top)
 
-        self.account_lbl = QLabel(account)
+        self.account_lbl = QLabel(account_display(account))
         self.account_lbl.setObjectName("TileAccount")
         self.account_lbl.setWordWrap(True)
         self.account_lbl.setToolTip(name)
@@ -5423,7 +5433,7 @@ class OverviewPage(QWidget):
                 t = max(known, key=lambda x: x.pct) if known else tiles[0]
                 pct, detail = t.pct, t.detail_lbl.text()
                 if len(tiles) > 1 and known:
-                    acct = (getattr(t, "account_lbl", None) and t.account_lbl.text()) \
+                    acct = (getattr(t, "account_lbl", None) and t.account_lbl.text().replace("\n", " ")) \
                         or getattr(t, "account_key", "")
                     detail = f"{detail} · {acct} (fullest of {len(tiles)})"
                     checking = sum(1 for x in tiles if x.pct is None and getattr(x, "_checking", False))
