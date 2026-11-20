@@ -106,6 +106,16 @@ shows the old split with its "as of" time.
   ID/Secret, a Dropbox App Key/Secret, or a OneDrive Client ID (no secret), then **Save
   credentials**. Connect each mount to show real used/total quota. Expired tokens
   show a red "Token expired — reconnect →" link.
+  Sign-in safety: Google, Dropbox and OneDrive each send a random `state` value with the
+  request and the app ignores the browser's answer unless it comes back unchanged (this
+  blocks a stray page or program from feeding the app a sign-in code). Google, Dropbox and
+  OneDrive also use PKCE (a one-time secret that makes an intercepted code useless). The
+  app listens for the browser's answer only on `127.0.0.1` port 53789, ignores requests
+  that carry no sign-in answer, and drops a connection that sends nothing for 5 seconds, so
+  a stalled connection cannot freeze sign-in. If a provider refuses the code, the message
+  shows only the HTTP status and the provider's short error code (for example
+  `invalid_grant`), never the response body. Google's acceptance of PKCE has not been
+  checked with a live sign-in.
 - **+ Add account** — monitor a quota-enabled account that has no local mount, or add a
   Proton Drive link tile.
 - Connected tiles with a known total show a **quota sparkline** (last 60 samples)
@@ -519,15 +529,21 @@ All persistent data lives in:
 ```
 | File | Contents |
 |---|---|
-| `app_credentials.json` | OAuth Client ID/Secret (Google), App Key/Secret (Dropbox) and the Client ID (OneDrive, under `onedrive`; no secret) |
+| `app_credentials.json` | OAuth Client ID/Secret (Google), App Key/Secret (Dropbox) and the Client ID (OneDrive, under `onedrive`; no secret). Mode 600 |
 | `tokens.json` | Per-account OAuth refresh tokens (mode 600). OneDrive entries carry `"provider": "onedrive"`; Microsoft returns a new refresh token on refresh and the app stores it |
-| `manual_accounts.json` | Accounts added via + Add account (including Proton link tiles) |
-| `quota_history.json` | Quota samples for the sparkline; a Google sample may also carry optional `drive` and `trash` keys (older samples without them still read) |
+| `manual_accounts.json` | Accounts added via + Add account (including Proton link tiles). Mode 600 |
+| `quota_history.json` | Quota samples for the sparkline; a Google sample may also carry optional `drive` and `trash` keys (older samples without them still read). Not locked down: written with the default file mode, not atomically |
 | `state.json` | Notification cooldown timestamp, settings preferences |
 | `lab_health_ignore.json` | Projects whose missing-manifest warning is silenced |
 | `lab_health_settings.json` | Lab Health thresholds (`env_idle_days`, `project_idle_days`) |
 | `env_last_use.json` | Newest sign of use per env, remembered across Lab Health scans |
 | `env_records/` | One rebuild record per env Lab Health moved to the Trash |
+
+The folder itself is mode 700 (only your user can open it), and the app tightens an older
+folder left at 755 the next time it saves a credentials, token or manual-accounts file. Those
+three files are each written to a temporary 600 file and then renamed into place, so a crash
+mid-write leaves the old file, never a half-written or world-readable one. `state.json` and
+`quota_history.json` do not get this treatment.
 
 This location survives `.app` rebuilds. Nothing is stored inside the bundle.
 
@@ -693,6 +709,10 @@ pytest
 source/dest tree (`tmp_path`), and `tests/test_overdue_cooldown.py` covers the
 overdue-notification cooldown persisted to `state.json` — both patch the real
 state file and secrets directory out so a test run never touches live app data.
+(`tests/conftest.py` also points the four secrets paths, `app_credentials.json`, `tokens.json`,
+`manual_accounts.json` and their folder, at a temporary folder for every test. It does not
+patch `quota_history.json` or `state.json`, so the suite can still write those two live files;
+this is a known open item in `TODO.md`.)
 `tests/test_appkit_guard.py` runs against the real Objective-C runtime in a
 subprocess; its drift check needs the `lab_hub` checkout beside this one.
 `tests/test_thread_lifetime.py` runs each thread-lifetime case in a child interpreter,
@@ -714,7 +734,8 @@ work has its own files, all with fake network replies (no live sign-in):
 `test_drive_split.py` (the Google Drive split rule, history keys, tile lines),
 `test_provider_registry.py` (the `PROVIDERS` registry and its dispatch), `test_onedrive.py`
 (sign-in with `state` check, refresh-token rotation and its atomic 0600 write, quota
-rendering, gauge) and `test_tile_links.py` (the Proton link-only tile and the per-tile links).
+rendering, gauge) and `test_tile_links.py` (the Proton link-only tile and the per-tile links) and
+`test_oauth_hardening.py` (the `state` check and PKCE for Google and Dropbox, the redirect listener over real loopback sockets, atomic 0600 writes, error text).
 
 ## Backlog
 - **Developer ID code signing** — eliminates the need to re-grant FDA after each rebuild

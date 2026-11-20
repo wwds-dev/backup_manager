@@ -1,6 +1,6 @@
 # Security
 
-Backup Control Center is free software under the MIT licence, maintained by one person. It keeps OAuth tokens for your cloud accounts in a local file readable only by your user (`~/Library/Application Support/Backup Control Center/tokens.json`, mode 0600) and runs a backup job over your files,
+Backup Control Center is free software under the MIT licence, maintained by one person. It keeps OAuth tokens for your cloud accounts in a local file readable only by your user (`~/Library/Application Support/Backup Control Center/tokens.json`, mode 0600, in a folder only your user can open, mode 0700; the Google, Dropbox and OneDrive app credentials and the manual accounts file are also written mode 0600, atomically). Sign-in uses a `state` check, PKCE and a loopback-only listener (details in the README). The app also runs a backup job over your files,
 so security reports are welcome.
 
 ## Report privately
