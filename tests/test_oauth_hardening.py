@@ -366,7 +366,8 @@ def test_listener_binds_loopback_only():
 
 
 def test_silent_connection_is_closed_after_the_handler_timeout(monkeypatch):
-    # Kills mutants `timeout = None` and `timeout = 600` (the constant is read per wait).
+    # Kills `timeout = None` (and any non-numeric value). The production default is pinned
+    # separately in test_production_handler_timeout_is_short.
     monkeypatch.setattr(cloud_quota, "_REDIRECT_REQUEST_TIMEOUT", 0.3)
     port = _free_port()
     t, _ = _start_wait(port, timeout=10)
@@ -388,3 +389,9 @@ def test_non_ascii_state_is_rejected_cleanly(monkeypatch, provider):
     assert "posts" not in seen
     assert cloud_quota._redirect_code({"code": ["x"], "state": ["é"]}, "abc") == (
         None, "Sign-in response did not match this request (state check failed). Try again.")
+
+
+def test_production_handler_timeout_is_short():
+    # The test above patches the constant, so pin the shipped value: an idle connection must
+    # be dropped within seconds, never minutes (a 600 s default would pass the patched test).
+    assert 0 < cloud_quota._REDIRECT_REQUEST_TIMEOUT <= 10
