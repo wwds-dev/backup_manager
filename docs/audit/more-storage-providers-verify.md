@@ -417,3 +417,135 @@ Real HOME was not used. Coverage and model-calling checks: not applicable / not 
 3. P3: `_SHOW_REQUEST_FILE` is exercised by a direct write_text, not the production writer.
 
 Verdict: first-pass items (1) and (2) of the fourth-pass P3s are PASS (closed). No P0/P1/P2 open. Overall PASS.
+
+
+---
+
+## Fourth pass at e6ef87c (2026-11-20, Verify session charming-pare, fake HOME)
+
+Scope: R1 (production handler timeout pinned) and R2 (main.py state paths isolated). All runs under a fake HOME, never the real one. **R1 PASS, R2 PASS, suite 509/0/0 (2 skipped, scratch checkout not beside the lab tree), real folder untouched by the runs, fake-home leak check clean.** Residual P3s: three conftest redirects (credentials, tokens, manual accounts) not mutation-covered by the isolation test; `WORKSPACE_REPORT` and `_SHOW_REQUEST_FILE` in `main.py` not redirected.
+
+
+Playbook last-reviewed 2026-10-14, status current (not stale). No model called (app-context Models used: None), live-eval item N/A.
+All Python ran with fake HOME (scratchpad/fakehome). Production code restored after every mutant; `git status` clean.
+
+### Verdict: PASS (R1, R2, suite, real folder, fake-home leak) with 3 low residuals
+
+| Item | Result |
+|---|---|
+| R1 production timeout pinned | PASS |
+| R2 main.py paths redirected | PASS (residuals below) |
+| Full suite x2 | PASS: 509 tests, 0 fail, 0 err, 2 skipped (expected 1, see note) |
+| Real folder untouched | PASS |
+| Fake-home leak check | PASS: Library folder empty after both full runs |
+
+### R1 (tests/test_oauth_hardening.py:392-397, cloud_quota.py:232, :260)
+New `test_production_handler_timeout_is_short`: `assert 0 < _REDIRECT_REQUEST_TIMEOUT <= 10`. Comment at :369 now says it kills `timeout = None` and any non-numeric value, the production default pinned separately: accurate (a constant patched to 0.3 cannot see 600).
+
+| Mutant (cloud_quota.py) | Result | Failing test |
+|---|---|---|
+| `_REDIRECT_REQUEST_TIMEOUT = 600` | KILLED | test_production_handler_timeout_is_short |
+| `= 11` | KILLED | same |
+| `= 0` | KILLED | same + test_first_sign_in_response_wins_over_a_later_one |
+| `= None` | KILLED | same |
+| ignore constant (`timeout = 600` at :260) | KILLED | test_silent_connection_is_closed_after_the_handler_timeout (G2) |
+| Handler `timeout = None` (:260) | KILLED | G2 test (no regression) |
+| bind `0.0.0.0` (:286) | KILLED | test_listener_binds_loopback_only (no regression) |
+
+Boundary note: 10 is accepted, 11 killed; fine.
+
+### R2 (tests/conftest.py:14-23, tests/test_secrets_isolation.py)
+Redirected (both a session baseline and per-test layer): cloud_quota SECRETS_DIR, CREDENTIALS_FILE, TOKENS_FILE, MANUAL_ACCOUNTS_FILE; main _STATE_FILE (main.py:1200), _QUOTA_HISTORY_FILE (:1297), _INSTANCE_LOCK_FILE (:6036). icloud_du.log (main.py:924), env_last_use.json and env_records (lab_health.py:637, :827), backup_records and worktree_records (derived from records_dir) follow SECRETS_DIR at call time, so they are covered.
+NOT redirected (module constants built from the live folder at import):
+- main.WORKSPACE_REPORT (main.py:1262, written at :3728 by a UI action)
+- main._SHOW_REQUEST_FILE (main.py:6053; written :6136, unlinked :5704/5755)
+- main.AUTOSYNC_STATE_DIR (main.py:4956, ~/Library/Application Support/git_autosync, default argument, read path)
+- main.BACKUP_DIR/LOG_DIR (~/Documents/lab/_Admin/backup, read-only globbing)
+No test in the full suite wrote any of them (fake Library empty), so no leak today; they are latent for a future test.
+
+Mutation (remove one redirect line from conftest, run test_secrets_isolation.py):
+| Removed | Result |
+|---|---|
+| SECRETS_DIR | KILLED |
+| _STATE_FILE | KILLED (state.json outside test folder) |
+| _QUOTA_HISTORY_FILE | KILLED |
+| _INSTANCE_LOCK_FILE | KILLED |
+| per-test layer entirely | KILLED |
+| CREDENTIALS_FILE | SURVIVED |
+| TOKENS_FILE | SURVIVED |
+| MANUAL_ACCOUNTS_FILE | SURVIVED |
+For the three survivors I ran the whole suite with each redirect removed: 509 pass, nothing written to the fake home, so no current test writes them unpatched (many tests patch TOKENS_FILE themselves). The isolation test does not assert these three; low gap.
+
+Per-test patch still works: 10+ existing tests patch SECRETS_DIR/_STATE_FILE/_QUOTA_HISTORY_FILE/TOKENS_FILE themselves (e.g. test_overdue_cooldown.py:22, test_tile_links.py:32-36); all pass. Baseline fallback: session scope, `mp.undo()` at end; points at a mktemp folder, not shared with per-test dirs; per-test layer is function-scoped so state does not carry between tests (state.json lives in each test's tmp_path). Not over-broad: no test asserts the default path (grep "Application Support" in tests: none), so no real test of path code is masked. `import main` at conftest import time is the only side effect (Qt offscreen already required).
+
+### Suite (JUnit XML k1.xml, k2.xml)
+Run 1 and 2 identical: tests=509 failures=0 errors=0 skipped=2; exit 139 (known Qt teardown). Skips: test_appkit_guard.py:110 "lab_hub checkout not beside this repo", test_backup_filter.py:322 "_Admin/backup scripts not on this machine". Both are environment skips; the scratch checkout is not beside the lab tree, so 2 not 1 here (the 1-skip figure came from a different location). Not a regression.
+Tests diff vs f050c9d: additions (test_secrets_isolation.py new, +1 test in test_oauth_hardening.py) and edits to two non-assertion lines: the conftest docstring/fixture and the G2 comment (test_oauth_hardening.py:369). No existing assertion changed or removed.
+
+### Real folder (baseline mtimes_before3.txt / perms_before3.txt)
+- mtime/size diff: only icloud_du.log and quota_history.json mtime changed (same sizes), +300 s apart exactly (1795207886 -> 1795208186 / 1795207887 -> 1795208187), the running app's 5-minute quota sample. state.json unchanged (1795207386, 102 B). No files added/removed.
+- Permissions: baseline was top-level only (12 lines); 0 baseline lines changed or missing in the recursive after-list; all file modes in after-list unchanged (credentials/tokens 0600).
+- I only read the folder. Not verified: that the app, not my runs, wrote those two files (inferred from the 300 s cadence and the fact that every run used the fake HOME).
+
+### Not verified
+Real-HOME behaviour (deliberately never run); live GUI; the 2 skipped tests; whether the `0 < t <= 10` bound is the right product value (spec says seconds).
+
+### Ranked gaps
+1. P3: test_secrets_isolation.py does not assert CREDENTIALS_FILE, TOKENS_FILE, MANUAL_ACCOUNTS_FILE (3 conftest mutants survive).
+2. P3: WORKSPACE_REPORT and _SHOW_REQUEST_FILE are not redirected (latent leak for a future test).
+3. P4: skip count depends on checkout location (2 here, 1 beside lab tree).
+
+
+---
+
+## Fifth pass at fa9cbb2 (2026-11-20, Verify session charming-pare, fake HOME)
+
+Scope: the two P3s of the fourth pass (credentials/tokens/manual-accounts redirects; workspace_report and show_request redirects). Fake HOME for every run. **PASS.** All five new redirects killed when removed (both layers or per-test layer); earlier four redirects no regression; suite 510/0/0, 2 skipped (checkout outside the lab tree), three runs; fake home empty after runs; real folder permission bits unchanged, only `state.json` changed (102 to 154 B at 21:05:42, most likely the running installed app; not attributable with certainty). Residual P3s: baseline-layer-only removal survives for all paths; the `_SHOW_REQUEST_FILE` test writes via `write_text` rather than the production writer (main.py:6136); `AUTOSYNC_STATE_DIR` (main.py:4956) is read-only and unredirected.
+
+
+Playbook qa-engineer: status current, last-reviewed 2026-10-14 (not stale). No model is called (app-context Models used: None), so the model checks do not apply.
+
+### Verdict: PASS (one P3 note)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Five new redirects (CREDENTIALS_FILE, TOKENS_FILE, MANUAL_ACCOUNTS_FILE, WORKSPACE_REPORT, _SHOW_REQUEST_FILE) | PASS | each removed from both layers and from the per-test layer alone: KILLED by test_every_secrets_and_state_writer_lands_in_the_test_folder |
+| Earlier four (SECRETS_DIR, _STATE_FILE, _QUOTA_HISTORY_FILE, _INSTANCE_LOCK_FILE) | PASS, no regression | all KILLED (SECRETS_DIR by both tests; the other three by test_real_writers_land_in_the_test_folder) |
+| Full suite x3 (m1, m2, m3; m4 extra) | PASS | JUnit: 510 tests / 0 failures / 0 errors / 2 skipped each time; exit 139/134 = known Qt teardown crash |
+| Assertions removed or weakened | PASS | only removed line in tests/ is a docstring line in conftest.py:3 (reworded); test_secrets_isolation.py is addition-only |
+| Fake-home leak | PASS | `find fakehome -mindepth 1` empty after a clean full-suite run (m3, and again after m4) |
+| Real folder | PASS with note | mtimes: only state.json differs (102 B -> 154 B, mtime 21:05:42). Permission bits unchanged (all files 0600/0644, dirs 0700/0755 as before; perms_before4 listed only a subset, new paths in the after list existed before per the 21-file mtime baseline). |
+
+### Mutants (HOME=fakehome, test_secrets_isolation.py only)
+Layers: both = line removed from _redirect; pertest = per-test fixture restores the original value; baseline = session fixture restores the original (live) value.
+
+| Redirect | both | pertest only | baseline only |
+|---|---|---|---|
+| CREDENTIALS_FILE | KILLED (new test) | KILLED (new test) | SURVIVED |
+| TOKENS_FILE | KILLED (new test) | KILLED (new test) | SURVIVED |
+| MANUAL_ACCOUNTS_FILE | KILLED (new test) | KILLED (new test) | SURVIVED |
+| WORKSPACE_REPORT | KILLED (new test) | KILLED (new test) | SURVIVED |
+| _SHOW_REQUEST_FILE | KILLED (new test) | KILLED (new test) | SURVIVED |
+| SECRETS_DIR | KILLED (both tests) | KILLED (both) | SURVIVED |
+| _STATE_FILE | KILLED (real_writers) | KILLED | SURVIVED |
+| _QUOTA_HISTORY_FILE | KILLED (real_writers) | KILLED | SURVIVED |
+| _INSTANCE_LOCK_FILE | KILLED (real_writers) | KILLED | SURVIVED |
+
+Baseline-only survivors are expected: the per-test layer still redirects while a test runs, and the baseline exists only for threads that outlive their test, which no test here exercises. Same for the earlier four. P3, unchanged from before; killing it needs a test that undoes the per-test patch and asserts the fallback is scratch.
+`git checkout -- tests` after every mutant; `git status --short` empty at the end.
+
+### Real-writer calls (tests/test_secrets_isolation.py)
+- cloud_quota.save_app_credentials / save_tokens / save_manual_accounts: production functions. workspace_extra.write_report(…, main.WORKSPACE_REPORT): production function (workspace_extra.py:295), the same call main.py:3728 makes.
+- _SHOW_REQUEST_FILE: the test calls `main._SHOW_REQUEST_FILE.write_text("now")` directly, not the production writer (main.py:6136 inside a method). It proves the path is redirected, not that the production code writes it; adequate for the isolation goal (P3 note).
+- Asserts: p.exists() and tmp_path in p.resolve().parents. There is no explicit assert that the file is absent from the live location; a removed redirect makes the write land at the fake home, which fails the parents check, and the fake home is the only place it could go. Acceptable.
+
+### Remaining module-level paths not redirected
+- main.py:4956 AUTOSYNC_STATE_DIR = HOME/Library/Application Support/git_autosync, used as a default arg of autosync_state (main.py:4993), a read path; not in the Backup Control Center folder.
+- main.py:123 HOME, main.py:43 _script: read-only.
+- lab_health.py:291 LAUNCHD_DIRS, :522 HISTORY_FILES: read paths from Path.home().
+- Everything else built from SECRETS_DIR is computed at call time (lab_health.py:46, 637, 827, 1119; main.py:924, 1213, 1324, 5703-5705, 6059, 6135) and follows the redirect. No further writers found.
+
+### Not verified
+- Baseline-only layer behaviour (no test).
+- That the production show-request writer (main.py:6136) writes to the redirected path (only the path is tested).
+- state.json change in the real folder: the installed app (pid 66494) is running and state.json holds app keys (column_widths, log_scroll_pos, last_workspace_scan). Its mtime fell near the end of run m3, but the fake home stayed empty after m3 and m4, and m4 left the real mtime untouched, so a test leak is not indicated; cannot rule out the coincidence absolutely. Other mtime-baseline files unchanged.
