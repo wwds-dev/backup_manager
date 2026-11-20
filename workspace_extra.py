@@ -286,7 +286,7 @@ def build_report(lab_root: Path, *, min_days: int = BACKUP_MIN_DAYS, wt_days: in
     return {"scanned": now, "worktrees": part(wts), "backups": part(backups),
             "archive": {"entries": len(archive), "kb": sum(r["kb"] for r in archive)},
             "caches": {"folders": len(caches), "kb": sum(r["kb"] for r in caches)},
-            "lab_root": lab_root_checks.scan(lab_root, now=now),    # report only: nothing is offered
+            "lab_root": lab_root_checks.scan_safe(lab_root, now=now),    # report only; a failed scan is one NOTE row
             "offered_kb": part(wts)["offered_kb"] + part(backups)["offered_kb"]
                           + sum(r["kb"] for r in caches),
             "offered_items": part(wts)["offered"] + part(backups)["offered"] + len(caches)}

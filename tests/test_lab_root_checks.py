@@ -663,3 +663,11 @@ def test_chain_of_in_lab_links_resolves_and_a_long_chain_is_broken(clean):
 def test_a_link_already_listed_gets_no_extra_note(clean, outside, home):
     os.symlink(outside / "big", clean / "far")                     # unnamed: R1 lists it
     assert by_rule(lrc.scan(clean, now=NOW)) == {"R1": ["far"]}
+
+
+def test_read_doc_a_dangling_link_is_not_read_even_where_open_reports_not_found(tmp_path, monkeypatch):
+    # macOS answers O_NOFOLLOW on a symlink with ELOOP; other systems may say ENOENT for a dangling one
+    os.symlink("gone", tmp_path / "d.md")
+    monkeypatch.setattr(os, "open", lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError()))
+    assert lrc._read_doc(tmp_path / "d.md") is None
+    assert lrc._read_doc(tmp_path / "missing.md") == ""

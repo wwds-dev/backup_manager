@@ -332,3 +332,13 @@ def test_report_lab_root_empty_for_a_clean_lab(lab):
     (lab / "AGENTS.md").write_text("`docs` `p`\n")
     (lab / "docs" / "a.md").write_text("x")
     assert wx.build_report(lab, now=NOW, cwds=[])["lab_root"] == []
+
+
+def test_report_survives_a_raising_lab_root_scan(lab, monkeypatch):
+    def boom(*a, **k):
+        raise ValueError("scan bug")
+    monkeypatch.setattr(wx.lab_root_checks, "scan", boom)
+    rep = wx.build_report(lab, now=NOW, cwds=[])
+    assert [(f["rule"], f["rel"]) for f in rep["lab_root"]] == [("NOTE", ".")]
+    assert "failed" in rep["lab_root"][0]["why"]
+    assert set(rep) >= {"worktrees", "backups", "archive", "caches", "offered_kb", "offered_items"}

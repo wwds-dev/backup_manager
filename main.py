@@ -22,6 +22,7 @@ import plistlib
 import re
 import shutil
 import subprocess
+import unicodedata
 import urllib.request
 
 import appkit_guard
@@ -1179,6 +1180,37 @@ def _plain_tip(text) -> str:
     """Tooltips are rich text to Qt; folder names come from other agents, so show them literally."""
     import html
     return "<p style='white-space:pre'>" + html.escape(str(text)) + "</p>"
+
+
+def _visible_text(text) -> str:
+    """Names come from other agents' folders: show control and format characters (newline, ESC, the
+    bidi overrides) as \\uXXXX so a name cannot reorder or hide the text around it."""
+    out = []
+    for ch in str(text):
+        if unicodedata.category(ch) in ("Cc", "Cf"):
+            out.append(f"\\u{ord(ch):04x}" if ord(ch) <= 0xFFFF else f"\\U{ord(ch):08x}")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def _finder_command(path: str) -> list[str]:
+    """What Show in Finder runs. `open -R` selects an existing real file or folder; a symlink (it would
+    reveal the target, maybe outside the lab) or a path that is gone (it would fail) shows its parent."""
+    if os.path.islink(path) or not os.path.lexists(path):
+        return ["open", os.path.dirname(path)]
+    return ["open", "-R", path]
+
+
+def _reveal_in_finder(button, path):
+    """Run Show in Finder (10 s at most); a non-zero result goes onto the button, not into the void."""
+    code, _out, err = run_cmd(_finder_command(path), timeout=10)
+    if code == 0:
+        button.setText("Show in Finder")
+        button.setToolTip("")
+    else:
+        button.setText("Failed")
+        button.setToolTip(_plain_tip(_visible_text(f"open exited {code}: {(err or '').strip()}")))
 
 
 def workspace_settings() -> dict:
@@ -3421,7 +3453,8 @@ class LabHealthCard(Card):
         dlg.exec()
 
     def _maybe_weekly_scan(self):
-        """Report only: counts and sizes into workspace_report.json. Deletes nothing."""
+        """Report only: counts and sizes, and the lab-root findings (file and folder names, symlink
+        targets, absolute paths), into workspace_report.json. Deletes nothing."""
         cfg = workspace_settings()
         st = _load_state()
         if not cfg["weekly"] or not workspace_extra.scan_due(st.get("last_workspace_scan")):
@@ -3460,7 +3493,7 @@ class LabHealthCard(Card):
             return {"backups": workspace_extra.scan_backups(root, min_days=cfg["backup_days"]),
                     "archive": workspace_extra.scan_archive(root, wts),
                     "caches": workspace_extra.scan_root_caches(root),
-                    "lab_root": lab_root_checks.scan(root)}
+                    "lab_root": lab_root_checks.scan_safe(root)}
 
         worker = CallWorker(work)
         worker.done.connect(self._workspace_ready)
@@ -3634,14 +3667,18 @@ class LabHealthCard(Card):
         t.verticalHeader().setVisible(False)
         t.setWordWrap(True)
         for i, f in enumerate(found):
-            size = "size unknown" if f["size"] is None else human_size(f["size"])
-            for c, text in enumerate((f["rule"], f["rel"], size, f"{f['age_days']} d", f["why"])):
-                it = QTableWidgetItem(text)          # plain text; names come from the lab's folders
+            if f["size"] is None:
+                size = "size unknown"
+            else:
+                size = ("at least " if f.get("partial") else "") + human_size(f["size"])
+            age = "age unknown" if f["age_days"] is None else f"{f['age_days']} d"
+            for c, text in enumerate((f["rule"], f["rel"], size, age, f["why"])):
+                it = QTableWidgetItem(_visible_text(text))   # plain text; names come from the lab's folders
                 it.setFlags(Qt.ItemIsEnabled)        # no tick box, nothing selectable or editable
-                it.setToolTip(_plain_tip(f["path"]))
+                it.setToolTip(_plain_tip(_visible_text(f["path"])))
                 t.setItem(i, c, it)
             b = QPushButton("Show in Finder")
-            b.clicked.connect(lambda _=False, p=f["path"]: run_cmd(["open", "-R", p]))   # reveal only
+            b.clicked.connect(lambda _=False, p=f["path"], b=b: _reveal_in_finder(b, p))   # reveal only
             t.setCellWidget(i, 5, b)
         hdr = t.horizontalHeader()
         for c in (0, 2, 3, 5):

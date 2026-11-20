@@ -209,9 +209,17 @@ a file, e.g. `imprint-base`) count as git repos.
   age, why, and a **Show in Finder** button; no tick box, nothing is deleted or moved): R1 a root file or
   folder not named in the lab's `AGENTS.md` or `README.md` (dotfiles aside), R2 stale `*.bak` / `*.orig` /
   `patch_*.py` leftovers, R3 a lingering `_to_delete/`, R4 an empty top-level folder, R5 an `active/*`
-  project not named there, R6 a root or `active/*` symlink that does not resolve. It reads listings and
-  those two files only and never follows a symlink. A weekly report-only scan (on by default, switch in
-  the dialog) writes `workspace_report.json` (with a `lab_root` list) and never deletes. The worktree age
+  project not named there (a prefix match, as in Folder Audit: a name that starts with the folder's name
+  counts), R6 a root or `active/*` symlink that does not resolve. Names are compared as NFC. It reads
+  listings and those two files only (a symlinked or unreadable doc is not read: one NOTE row says so and
+  R1 and R5 are skipped). A symlink is listed from its own `lstat` and never walked or opened; to learn
+  whether it resolves it is followed by hand, one `lstat` per step, and only through the lab and your home
+  folder: a link that leads anywhere else gets a NOTE row "not checked", never R6. A size is marked "at
+  least" or "size unknown" when a folder was too big, unreadable or changing. **Show in Finder** reveals
+  the item; for a symlink or a path that is gone it opens the parent folder, and a failure shows on the
+  button. A weekly report-only scan (on by default, switch in the dialog) writes `workspace_report.json`
+  (with a `lab_root` list: it now holds file and folder names, absolute paths and symlink targets from the
+  lab root, in the mode-600 file in the app's support folder) and never deletes. The worktree age
   (default 14 days) is set here too.
 - **🌿 Worktrees…** — lists the git worktrees under the lab (agent worktrees in
   `.claude/worktrees/`, `archive/` checkouts, `worktrees/`) and offers one only when **every**
