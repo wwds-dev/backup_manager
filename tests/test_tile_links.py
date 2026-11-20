@@ -100,7 +100,7 @@ def test_proton_tile_shows_no_number_no_bar(qapp, monkeypatch, tmp_path):
     monkeypatch.setattr(main, "disk_usage_for", lambda p: (_ for _ in ()).throw(AssertionError("disk")))
     tile = main.StorageTile(PROTON, tmp_path, True)
     assert tile.provider == "proton"
-    assert tile.detail_lbl.text() == "No quota available (Proton has no public API)"
+    assert tile.detail_lbl.text() == "No quota available (no quota API this app can use)"
     assert tile.bar.isHidden()
     assert tile.pct is None
     assert not any(ch.isdigit() for ch in tile.detail_lbl.text())

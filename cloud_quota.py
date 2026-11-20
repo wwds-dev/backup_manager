@@ -640,7 +640,7 @@ PROVIDERS = {
     # No public quota API: link-only tile (no bar, no number, no gauge).
     "proton": Provider(
         "proton", "Proton Drive", "ProtonDrive", "https://drive.proton.me/", has_quota=False,
-        no_quota_text="No quota available (Proton has no public API)",
+        no_quota_text="No quota available (no quota API this app can use)",
     ),
     # iCloud keeps its own tile (ICloudTile); the registry supplies only its link.
     "icloud": Provider(

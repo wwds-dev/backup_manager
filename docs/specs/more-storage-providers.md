@@ -53,8 +53,8 @@ docs, and re-check that all of them accept the app's loopback redirect.
 ### 1c. Proton Drive without quota
 
 Finding: no public quota API (tried, does not work), so no number can be read. Proposal: add a
-**link-only tile**, titled "Proton Drive" with the fixed text "No quota available (Proton has no public
-API)", **no bar, no percentage, no gauge slot, and no local-disk number** (the old reason these were
+**link-only tile**, titled "Proton Drive" with the fixed text "No quota available (no quota API this app
+can use)", **no bar, no percentage, no gauge slot, and no local-disk number** (the old reason these were
 left out was the tile repeating the Local Disk figure; this one shows none). It carries the access links
 below, so it is worth its row only as a shortcut. Shown only when a `ProtonDrive-*` mount exists, or the
 owner adds it by hand. Recommendation: **add it**, small, cost one registry entry plus a tile variant;
@@ -182,7 +182,7 @@ Read first: `cloud_quota.py`, `StorageTile` (`main.py:1633-1900`), `StorageCard.
    lock around the whole refresh-then-store is required for Box and is reused by OneDrive (cheap). Overlapping
    fetches therefore cannot interleave a read of `tokens.json` with another's write.
 7. **Link-only tiles (Proton) and links:** `StorageTile` takes `has_quota` from the registry; when False it
-   never calls `set_usage` network or disk paths: fixed text "No quota available (Proton has no public API)",
+   never calls `set_usage` network or disk paths: fixed text "No quota available (no quota API this app can use)",
    bar hidden, `pct` stays None, and `refresh_gauges` skips it. One link button per tile (each account its own) from
    `registry.web_url` (Google: with `authuser=<email>`, email URL-encoded) when not mounted; "Open in Finder" when mounted (unchanged).
 8. **Gauges:** the four fixed slots stay; OneDrive adds a fifth only when a OneDrive tile exists. `Gauge`
