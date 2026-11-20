@@ -351,3 +351,40 @@ def test_first_sign_in_response_wins_over_a_later_one():
         assert box["result"]["code"] == ["first"] and box["result"]["state"] == ["first"]
     finally:
         late.close()
+
+
+# ---------------------------------------------------------------------------- Verify gaps G1, G2, S1
+def test_listener_binds_loopback_only():
+    port = _free_port()
+    t, _ = _start_wait(port, timeout=10)
+    try:
+        assert cloud_quota._active_server is not None
+        assert cloud_quota._active_server.server_address[0] == "127.0.0.1"
+    finally:
+        _get(port, "/?code=c5&state=s5")
+        t.join(5)
+
+
+def test_silent_connection_is_closed_after_the_handler_timeout(monkeypatch):
+    # Kills mutants `timeout = None` and `timeout = 600` (the constant is read per wait).
+    monkeypatch.setattr(cloud_quota, "_REDIRECT_REQUEST_TIMEOUT", 0.3)
+    port = _free_port()
+    t, _ = _start_wait(port, timeout=10)
+    silent = socket.create_connection(("127.0.0.1", port))
+    try:
+        _get(port, "/favicon.ico")  # stray request: the wait stays alive
+        silent.settimeout(2)
+        assert silent.recv(1) == b"", "server did not close the silent connection"
+    finally:
+        silent.close()
+        _get(port, "/?code=c6&state=s6")
+        t.join(5)
+
+
+@pytest.mark.parametrize("provider", ["google", "dropbox"])
+def test_non_ascii_state_is_rejected_cleanly(monkeypatch, provider):
+    (ok, err), seen = _connect(monkeypatch, provider, state_override="é")
+    assert not ok and "state check failed" in err
+    assert "posts" not in seen
+    assert cloud_quota._redirect_code({"code": ["x"], "state": ["é"]}, "abc") == (
+        None, "Sign-in response did not match this request (state check failed). Try again.")

@@ -490,7 +490,7 @@ ONEDRIVE_DRIVE_URL = "https://graph.microsoft.com/v1.0/me/drive"
 def _redirect_code(result, expected_state):
     """(code, error) from the redirect query. The code is used only when `state` matches."""
     got = (result.get("state") or [""])[0]
-    if not got or not secrets.compare_digest(got, expected_state):
+    if not got or not secrets.compare_digest(got.encode(), expected_state.encode()):
         return None, "Sign-in response did not match this request (state check failed). Try again."
     code = (result.get("code") or [None])[0]
     if not code:
