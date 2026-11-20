@@ -95,10 +95,10 @@ def _read_json(path):
     return {}
 
 
-def _write_json(path, data):
-    SECRETS_DIR.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2))
-    os.chmod(path, 0o600)
+def _ensure_secrets_dir():
+    """Create the secrets folder owner-only (0700), and tighten one an older build left 0755."""
+    SECRETS_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(SECRETS_DIR, 0o700)
 
 
 def load_app_credentials():
@@ -106,13 +106,14 @@ def load_app_credentials():
 
 
 def save_app_credentials(data):
-    _write_json(CREDENTIALS_FILE, data)
+    _write_json_atomic(CREDENTIALS_FILE, data)
 
 
 def _write_json_atomic(path, data):
     """Write `data` to `path` as 0600 via a temp file in the same folder and os.replace,
-    so a reader never sees a half-written file and a failed write leaves the old one."""
-    SECRETS_DIR.mkdir(parents=True, exist_ok=True)
+    so a reader never sees a half-written file and a failed write leaves the old one.
+    Every secrets file (credentials, tokens, manual accounts) is written this way."""
+    _ensure_secrets_dir()
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
     try:
         os.fchmod(fd, 0o600)
@@ -186,7 +187,7 @@ def load_manual_accounts():
 
 
 def save_manual_accounts(accounts):
-    _write_json(MANUAL_ACCOUNTS_FILE, {"accounts": accounts})
+    _write_json_atomic(MANUAL_ACCOUNTS_FILE, {"accounts": accounts})
 
 
 def add_manual_account(key, provider, label):

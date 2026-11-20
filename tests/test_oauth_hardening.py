@@ -223,3 +223,84 @@ def test_error_redirect_ends_the_wait():
     t.join(5)
     assert not t.is_alive()
     assert box["result"]["error"] == ["access_denied"]
+
+
+# ---------------------------------------------------------------------------- P2-3 secrets files
+import os  # noqa: E402
+import stat  # noqa: E402
+
+
+def _mode(path):
+    return stat.S_IMODE(os.stat(path).st_mode)
+
+
+@pytest.fixture
+def fresh_dir(monkeypatch, tmp_path):
+    """SECRETS_DIR not created yet, files inside it, umask 022 (the macOS default)."""
+    sd = tmp_path / "sd"
+    monkeypatch.setattr(cloud_quota, "SECRETS_DIR", sd)
+    monkeypatch.setattr(cloud_quota, "CREDENTIALS_FILE", sd / "app_credentials.json")
+    monkeypatch.setattr(cloud_quota, "TOKENS_FILE", sd / "tokens.json")
+    monkeypatch.setattr(cloud_quota, "MANUAL_ACCOUNTS_FILE", sd / "manual_accounts.json")
+    old = os.umask(0o022)
+    yield sd
+    os.umask(old)
+
+
+WRITERS = {
+    "credentials": (lambda: cloud_quota.save_app_credentials(CREDS),
+                    lambda: cloud_quota.CREDENTIALS_FILE),
+    "manual": (lambda: cloud_quota.save_manual_accounts([{"key": "k", "provider": "proton", "label": "x"}]),
+               lambda: cloud_quota.MANUAL_ACCOUNTS_FILE),
+    "tokens": (lambda: cloud_quota.save_tokens({KEY: {"provider": "google", "refresh_token": "r"}}),
+               lambda: cloud_quota.TOKENS_FILE),
+}
+
+
+@pytest.mark.parametrize("which", list(WRITERS))
+def test_new_folder_is_0700_and_file_0600(fresh_dir, which):
+    write, path = WRITERS[which]
+    write()
+    assert _mode(fresh_dir) == 0o700
+    assert _mode(path()) == 0o600
+
+
+@pytest.mark.parametrize("which", list(WRITERS))
+def test_existing_loose_folder_and_file_are_tightened(fresh_dir, which):
+    write, path = WRITERS[which]
+    fresh_dir.mkdir(mode=0o755)
+    os.chmod(fresh_dir, 0o755)
+    path().write_text("{}")
+    os.chmod(path(), 0o644)
+    write()
+    assert _mode(fresh_dir) == 0o700
+    assert _mode(path()) == 0o600
+
+
+@pytest.mark.parametrize("which", list(WRITERS))
+def test_file_is_0600_before_it_takes_the_real_name(fresh_dir, monkeypatch, which):
+    write, path = WRITERS[which]
+    real_replace = os.replace
+    seen = []
+
+    def spy(src, dst):
+        seen.append((_mode(src), json.loads(open(src).read())))
+        return real_replace(src, dst)
+    monkeypatch.setattr(cloud_quota.os, "replace", spy)
+    write()
+    assert seen and seen[0][0] == 0o600 and seen[0][1]  # complete content, already private
+
+
+@pytest.mark.parametrize("which", list(WRITERS))
+def test_failed_replace_leaves_the_old_file(fresh_dir, monkeypatch, which):
+    write, path = WRITERS[which]
+    fresh_dir.mkdir(mode=0o700)
+    path().write_text('{"old": true}')
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+    monkeypatch.setattr(cloud_quota.os, "replace", boom)
+    with pytest.raises(OSError):
+        write()
+    assert json.loads(path().read_text()) == {"old": True}
+    assert [p.name for p in fresh_dir.iterdir()] == [path().name]  # no temp file left
