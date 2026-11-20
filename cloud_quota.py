@@ -145,7 +145,9 @@ def save_tokens(data):
 
 
 def _set_token_entry(account_key, entry):
-    with _TOKENS_LOCK:
+    # Account refresh lock first (same order as disconnect and a refresh), so a refresh in
+    # flight cannot store its rotated old-grant token over the one a new sign-in just saved.
+    with _refresh_lock(account_key), _TOKENS_LOCK:
         tokens = load_tokens()
         tokens[account_key] = entry
         save_tokens(tokens)
@@ -364,7 +366,7 @@ def google_quota(account_key):
     )
     resp.raise_for_status()
     quota = resp.json().get("storageQuota", {})
-    used = int(quota.get("usage", 0))
+    used = max(int(quota.get("usage", 0)), 0)
     total = int(quota["limit"]) if "limit" in quota else None  # unlimited plans omit it
     drive = int(quota["usageInDrive"]) if "usageInDrive" in quota else None
     trash = int(quota["usageInDriveTrash"]) if "usageInDriveTrash" in quota else None
@@ -466,7 +468,7 @@ def dropbox_quota(account_key):
     )
     resp.raise_for_status()
     data = resp.json()
-    used = int(data.get("used", 0))
+    used = max(int(data.get("used", 0)), 0)
     allocation = data.get("allocation", {})
     total = allocation.get("allocated")
     if total is None:
@@ -584,7 +586,7 @@ def onedrive_quota(account_key):
     )
     resp.raise_for_status()
     q = resp.json().get("quota") or {}
-    used = int(q.get("used", 0))
+    used = max(int(q.get("used", 0)), 0)
     # Only an absent key means "no limit" (None). A total of 0, or one that is not a
     # positive number, is "not reported" (0): never shown as an unlimited plan.
     total = None

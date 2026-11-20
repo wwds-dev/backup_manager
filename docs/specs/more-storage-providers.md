@@ -294,6 +294,20 @@ P3-6 (quota history written 0644, non-atomic); P3-7 needs no change. Review P3-2
 (double history read) also stay open. Not verified: Google's acceptance of PKCE for the Desktop client
 type (no live sign-in).
 
+## Secure follow-up fix log (2026-11-20, P3-4, P3-5, P3-6)
+
+P2-1, P2-2, P2-3, P3-1, P3-2 were already fixed above (`af48bb6`..`fdbf6ad`); this session found them on the
+branch and added only the rest. Tests first (`tests/test_secure_followups.py`).
+
+| Finding | Fix | Test (mutant killed) |
+|---|---|---|
+| P3-4 | `_set_token_entry` takes the account refresh lock before the tokens lock | blocks while a refresh holds the lock (lock removed) |
+| P3-5 | `used` clamped to >= 0 in Google, Dropbox and OneDrive quota | negative `used` gives 0 (each clamp removed, 3 mutants) |
+| P3-6 | `main._append_quota_sample` writes via `_write_json_atomic` (0600, folder 0700) | writer called, file 0600, folder 0700 (plain `write_text`) |
+
+Suite: tests=514, failures=0, errors=0, skipped=1 (JUnit XML). Still open: P3-3 (disconnect can block the UI
+up to ~20 s), review P3-2 and P3-3.
+
 ## Verify-gap fix log (2026-11-20, Build follow-up for the second Verify pass at 2084ec2)
 Test-first, loopback sockets only, no provider call.
 - **G1** `test_listener_binds_loopback_only`: mutant `("0.0.0.0", port)` at the bind line FAILS it (restored).
