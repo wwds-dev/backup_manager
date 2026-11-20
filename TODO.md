@@ -1,5 +1,7 @@
 # Backup Control Center — TODO
 
+> **Testing first (owner, 2026-11-20).** `P0` now means: needed before the owner can test this app on his own Mac, or a security must. Everything else waits until after testing, and no new feature or redesign row starts unless the owner asks for it.
+
 > **Legend** — priority `P0` critical · `P1` high · `P2` normal · `P3` low
 > categories `security` `bug` `feature` `performance` `design` `docs` `testing` `infra` `research`
 > owner `@me` (needs you — accounts, keys, money, judgement) · `@ai` (Claude can do this)
