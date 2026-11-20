@@ -42,7 +42,7 @@ No CHANGELOG file exists (app-context says changes live in TODO and spec logs); 
 - Not done: no OneDrive sign-in, owner's real `storageQuota` not read, app not built, no screenshot.
 
 ## Open (not fixed here: would edit `.py`)
-- Stale copy (review P3-2), **docstrings fixed afterwards on owner's "docs-only" go-ahead** (`cloud_quota.py` module docstring, `AddAccountDialog` docstring in `main.py`; no string shown in the UI changed). Still open: the displayed text below (`main.py:2436-2439`, `:2293`). Original finding: `cloud_quota.py:2-6,22` docstring says Google and Dropbox only and that
+- Stale copy (review P3-2), **docstrings fixed afterwards on owner's "docs-only" go-ahead** (`cloud_quota.py` module docstring, `AddAccountDialog` docstring in `main.py`; no string shown in the UI changed). The two displayed strings (`main.py:2293` Cloud Accounts text, `:2437` Add Account label) were reworded afterwards on the owner's yes. Original finding: `cloud_quota.py:2-6,22` docstring says Google and Dropbox only and that
   Proton/iCloud "fall back to local disk free space" (contradicted by the last-known fallback and the Proton tile);
   `main.py:2426` docstring and `:2436-2439` AddAccountDialog text say "Google Drive or Dropbox";
   `main.py:5-8` header comment. This is displayed text in part, so left for Secure/Build.

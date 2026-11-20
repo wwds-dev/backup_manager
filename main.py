@@ -2290,7 +2290,7 @@ class CloudAccountsDialog(QDialog):
         layout.addWidget(QLabel(
             f"Connect {names} accounts to show their real storage\n"
             "quota instead of local disk free space. Requires a one-time OAuth app\n"
-            "(see README) — paste its Client ID/Secret or App Key/Secret below."
+            "(see README) — paste its Client ID (and Secret or App Key/Secret where the provider has one; OneDrive has no secret) below."
         ))
 
         creds = cloud_quota.load_app_credentials()
@@ -2434,7 +2434,7 @@ class AddAccountDialog(QDialog):
         layout = QVBoxLayout(self)
 
         layout.addWidget(QLabel(
-            "Monitor a Google Drive or Dropbox account's storage quota even if it\n"
+            "Monitor a Google Drive, Dropbox or OneDrive account's storage quota even if it\n"
             "isn't mounted locally. Needs the OAuth app credentials from\n"
             "Cloud Accounts… saved first."
         ))
