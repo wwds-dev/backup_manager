@@ -407,3 +407,11 @@ Lab Health no longer runs a project's own pre-commit hook (gitleaks still runs).
 fsmonitor script and a pre-commit hook; both mutants (flags removed from `_git`, from the status call) fail
 them. (e) `docs/foundry/app-context.md` placeholders filled from code, README, TODO and tests (Invariants
 untouched; its own template line stays). No CHANGELOG file exists; the note lives here and in `TODO.md`.
+
+## 20. Release log (slice 2)
+
+2026-11-18: v2.119 merged (`16097f5`), built and installed. Real-removal check by the owner in the installed app:
+`backups/pre_backstage_split_20260927-232944` ticked in 🗂 Workspace… and cleaned. The dialog said "moved to the Trash
+(Put Back to restore)"; the folder is gone from `lab/backups/` (6 left) and a mode-600 record
+`backup_records/pre_backstage_split_20260927-232944__1795038624.json` was written first. This closes the
+"real `QFile.moveToTrash`" gap listed in section 18. Still not verified: the QTimer firing in the live app.
