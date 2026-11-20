@@ -1,6 +1,6 @@
 """Shared fixtures. No test may touch the live ~/Library/Application Support/Backup Control Center
 files: the secrets paths (cloud_quota) and the paths main.py derives from them at import time
-(state.json, quota_history.json, gui.lock; icloud_du.log is built from SECRETS_DIR at call time).
+(state.json, quota_history.json, gui.lock, workspace_report.json, show_request; icloud_du.log is built from SECRETS_DIR at call time).
 
 Two layers: a session-wide baseline, so that when a per-test patch is undone the path falls back
 to a scratch folder and never to the live one (a worker thread that outlives its test would
@@ -21,6 +21,8 @@ def _redirect(mp, d):
     mp.setattr(main, "_STATE_FILE", d / "state.json")
     mp.setattr(main, "_QUOTA_HISTORY_FILE", d / "quota_history.json")
     mp.setattr(main, "_INSTANCE_LOCK_FILE", d / "gui.lock")
+    mp.setattr(main, "WORKSPACE_REPORT", d / "workspace_report.json")
+    mp.setattr(main, "_SHOW_REQUEST_FILE", d / "show_request")
 
 
 @pytest.fixture(autouse=True, scope="session")
