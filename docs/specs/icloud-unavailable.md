@@ -47,3 +47,16 @@ Tests: 4 in `tests/test_main_window.py`; 4 mutations caught.
 Reviewer P1 fixed: a partial total is shown as "at least X (some folders unreadable)" (type
 `PartialBytes`), never as a plain size. P2 fixed: the log keeps only the error text (no paths)
 and is mode 0600; more tests (single-line rc 1, timeout, garbage). 4 more mutations caught.
+
+## Addendum 2026-11-20: "at least 16.0 MB (some folders unreadable)" was misleading
+Evidence: `icloud_du.log` from the installed v2.163 (14:44) reads `rc=1 out='16428\t…'
+err='Resource deadlock avoided'`, so the card was no longer "Unavailable". EDEADLK is how
+macOS refuses to open a cloud-only (dataless) iCloud item without downloading it; such items
+use no local disk, so the printed total is the exact local cache. Fix: `icloud_local_bytes()`
+treats `Resource deadlock avoided` lines as "not downloaded" and returns a plain total when
+they are the only errors; any other error still gives `PartialBytes`. The log now records
+`not_downloaded=` and `other_errors=` counts and the first other error (still no paths).
+Tests: 3 new in `tests/test_main_window.py`; 3 mutations caught; full suite green.
+Not verified: the card on screen after a restart (screen access declined this session), and
+the EDEADLK-means-dataless reading against Apple documentation (based on known
+`setiopolicy_np` materialization behaviour).

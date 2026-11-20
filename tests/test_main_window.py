@@ -328,6 +328,29 @@ def test_icloud_bytes_timeout_and_garbage_are_none(monkeypatch, tmp_path):
     assert main.icloud_local_bytes() is None
 
 
+def test_icloud_bytes_not_downloaded_items_keep_total_exact(monkeypatch, tmp_path):
+    # Seen in the installed app: du rc 1, "Resource deadlock avoided" (cloud-only items).
+    err = "du: /x/a: Resource deadlock avoided\ndu: /x/b: Resource deadlock avoided\n"
+    _fake_du(monkeypatch, tmp_path, 1, "16428\t/x\n", err)
+    n = main.icloud_local_bytes()
+    assert n == 16428 * 1024 and not isinstance(n, main.PartialBytes)
+    log = (tmp_path / "icloud_du.log").read_text()
+    assert "not_downloaded=2 other_errors=0" in log and "/x/a" not in log
+
+
+def test_icloud_bytes_mixed_errors_stay_partial(monkeypatch, tmp_path):
+    err = "du: /x/a: Resource deadlock avoided\ndu: /x/b: Operation not permitted\n"
+    _fake_du(monkeypatch, tmp_path, 1, "8\t/x\n", err)
+    assert isinstance(main.icloud_local_bytes(), main.PartialBytes)
+    log = (tmp_path / "icloud_du.log").read_text()
+    assert "other_errors=1" in log and "Operation not permitted" in log
+
+
+def test_icloud_bytes_rc1_without_stderr_is_partial(monkeypatch, tmp_path):
+    _fake_du(monkeypatch, tmp_path, 1, "8\t/x\n", "")
+    assert isinstance(main.icloud_local_bytes(), main.PartialBytes)
+
+
 def test_icloud_tile_text_partial():
     assert "at least" in _tile_text(main.PartialBytes(4096))
     assert "at least" not in _tile_text(4096)

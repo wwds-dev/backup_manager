@@ -912,20 +912,30 @@ class PartialBytes(int):
     """A du total taken although du reported errors: some folders were unreadable."""
 
 
+# strerror(EDEADLK). macOS returns it when a cloud-only ("dataless") iCloud item is
+# opened by a process that will not download it: the item uses no local disk.
+DATALESS_ERROR = "Resource deadlock avoided"
+
+
 def icloud_local_bytes() -> int | None:
     """Bytes used by the local iCloud cache, or None if unavailable.
 
-    `du` may exit 1 after printing a total when some subfolders are unreadable; that
-    partial total is used (it can understate). rc and the first error line go to
-    `icloud_du.log` (overwritten each run) so the cause of "Unavailable" is visible."""
+    `du` exits 1 after printing a total when it cannot open some items. Items that are
+    only in iCloud (not downloaded) fail with DATALESS_ERROR and take no local space, so
+    the total is still exact; any other error makes it a PartialBytes (it can understate).
+    rc, the error counts and the first other error go to `icloud_du.log` (overwritten each
+    run, no paths) so the cause of "Unavailable" is visible."""
     started = time.monotonic()
     rc, out, err = run_cmd(["du", "-sk", str(HOME / "Library" / "Mobile Documents")], timeout=30)
+    errors = [ln.rsplit(": ", 1)[-1] for ln in err.strip().splitlines()]
+    other = [e for e in errors if e != DATALESS_ERROR]
     try:
         log = cloud_quota.SECRETS_DIR / "icloud_du.log"
         log.write_text(
             f"{datetime.now().isoformat(timespec='seconds')} rc={rc} "
             f"secs={time.monotonic() - started:.1f} out={out.strip()[-80:]!r} "
-            f"err={(err.strip().splitlines() or [''])[0].rsplit(': ', 1)[-1][:120]!r}\n")
+            f"not_downloaded={len(errors) - len(other)} other_errors={len(other)} "
+            f"err={(other or [''])[0][:120]!r}\n")
         os.chmod(log, 0o600)
     except OSError:
         pass
@@ -933,7 +943,7 @@ def icloud_local_bytes() -> int | None:
     if lines:
         try:
             n = int(lines[-1].split("\t", 1)[0]) * 1024
-            return n if rc == 0 else PartialBytes(n)
+            return n if rc == 0 or (errors and not other) else PartialBytes(n)
         except ValueError:
             pass
     return None
