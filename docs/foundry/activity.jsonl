@@ -96,3 +96,9 @@
 {"ts": "2026-11-20T22:34:02", "phase": "secure", "state": "done", "spec": "more-storage-providers"}
 {"ts": "2026-11-20T22:39:50", "phase": "secure", "state": "start", "spec": "more-storage-providers"}
 {"ts": "2026-11-20T22:41:51", "phase": "secure", "state": "done", "spec": "more-storage-providers"}
+{"ts": "2026-11-20T19:39:20", "phase": "verify", "state": "start", "spec": "more-storage-providers"}
+{"ts": "2026-11-20T19:39:20", "phase": "verify", "state": "done", "spec": "more-storage-providers"}
+{"ts": "2026-11-20T20:58:19", "phase": "verify", "state": "start", "spec": "more-storage-providers"}
+{"ts": "2026-11-20T20:58:19", "phase": "verify", "state": "done", "spec": "more-storage-providers"}
+{"ts": "2026-11-20T21:07:15", "phase": "verify", "state": "start", "spec": "more-storage-providers"}
+{"ts": "2026-11-20T21:07:15", "phase": "verify", "state": "done", "spec": "more-storage-providers"}
