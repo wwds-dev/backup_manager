@@ -114,10 +114,17 @@ rsync exclude patterns, and see the total local size of the backup set.
   line yet), and its local `du` size, filled in once the scan finishes.
 - **Double-click a folder** (or right-click → Open in Finder) to open it.
 - **Right-click any folder** → "Back up now" runs rsync for just that one folder — no
-  need to wait for the full nightly run after a large edit.
-- **Exclude patterns → 🔍 Preview matches** — runs `find` against your backed-up folders
-  for each pattern and shows what would be skipped, so you can verify excludes before
-  the next run.
+  need to wait for the full nightly run after a large edit. It uses the same filter as
+  the nightly script, read from `backup_to_gdrive.sh` (`backup_filter.py`): `*.example`,
+  `*.sample` and `*.template` are copied, then `gdrive_backup_excludes.txt` and
+  `secret_name_patterns.txt` are skipped, so `.env` files never go to Google Drive. If the
+  secret list is missing or empty, or the script's filter differs from the app's, it
+  refuses to run and says why.
+- **Exclude patterns → 🔍 Preview matches** — walks the first three backed-up folders
+  with the same rules (the patterns in the editor, then the secret names, with the
+  example/sample/template files let through first) and lists what the Google Drive copy
+  keeps out, secret names marked `[secret: never sent to Google Drive]`. Matching is
+  case-sensitive, as rsync's is.
 
 ---
 
@@ -488,6 +495,7 @@ closed, uninstalled, or replaced. Everything lives in `_Admin/backup/`:
     ├── backup_to_gdrive.sh              the backup itself; everything else feeds it
     ├── backup_folders.txt               WHICH folders (one per line, relative to ~/Documents)
     ├── gdrive_backup_excludes.txt       WHAT to skip inside them (rsync patterns)
+    ├── secret_name_patterns.txt         secret file names kept off Google Drive
     ├── com.andreas.gdrive-backup.plist  WHEN, as a launchd fallback
     ├── logs/
     │   ├── backup_YYYY-MM-DD.log        one per real run — the app reads these for
@@ -580,6 +588,7 @@ Never use `QThread.terminate()`. Reviewed in `docs/audit/qthread-lifetime-review
 | `workspace.py` | Qt-free worktree rules for 🌿 Worktrees: gates, scan, restore record, removal |
 | `lab_health.py` | Qt-free Lab Health rules: cleanup, env use detection, rebuild records, commit warnings, thresholds, other caches |
 | `cloud_quota.py` | Google Drive / Dropbox OAuth and quota, manual accounts, the app-support folder (`SECRETS_DIR`) |
+| `backup_filter.py` | Qt-free rsync filter for every copy to Google Drive, read from `backup_to_gdrive.sh`; fails closed |
 | `verify.py` | Backup spot-check library (not wired into the app yet) |
 | `appkit_guard.py` | macOS 27 `clickCount` guard, copied from Lab Hub |
 | `version.py`, `VERSION` | `v<MAJOR>.<BUILD>` version string; `VERSION` holds MAJOR |
@@ -606,7 +615,10 @@ subprocess; its drift check needs the `lab_hub` checkout beside this one.
 `tests/test_thread_lifetime.py` runs each thread-lifetime case in a child interpreter,
 because the failure it guards against is SIGABRT and would otherwise take pytest down;
 `tests/test_replace_worker.py` covers a superseded scan being kept alive with its result
-dropped.
+dropped. `tests/test_backup_filter.py` checks the one-folder backup's rsync arguments with
+a fake process and dummy secret-named files, copies a `tmp_path` tree with a real local
+rsync (never to Google Drive) to prove no secret name arrives, checks Preview matches
+agrees, and fails if `backup_to_gdrive.sh`'s filter changes without the app.
 
 The rest: `test_lab_health.py` (Lab Health rules in `lab_health.py`, plus a few card
 checks: selection, ticking, tooltips),

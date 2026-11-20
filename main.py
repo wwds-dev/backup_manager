@@ -25,6 +25,7 @@ import subprocess
 import urllib.request
 
 import appkit_guard
+import backup_filter
 import lab_health
 import workspace
 import workspace_extra
@@ -801,6 +802,22 @@ def run_cmd(args, timeout=60):
         return r.returncode, r.stdout, r.stderr
     except Exception as e:
         return 1, "", str(e)
+
+
+RSYNC = "/opt/homebrew/bin/rsync"
+
+
+def single_folder_rsync_args(folder: str) -> list[str]:
+    """rsync arguments for the one-folder "Back up now": the same flags and the same
+    include/exclude filter as backup_to_gdrive.sh, so a secret-named file never goes to
+    Google Drive by this path. Raises backup_filter.FilterError (fail closed)."""
+    return [
+        "-rltvh", "--update", "--modify-window=2",
+        "--no-perms", "--no-owner", "--no-group",
+        *backup_filter.rsync_filter_args(BACKUP_DIR),
+        "--stats", "--itemize-changes",
+        str(DOCS / folder) + "/", str(DEST_ROOT / folder) + "/",
+    ]
 
 
 def read_folders():
@@ -2215,35 +2232,55 @@ class ExcludesDialog(QDialog):
         layout.addLayout(row)
 
     def save(self):
+        loose = backup_filter.include_lines(
+            backup_filter.read_patterns_text(self.edit.toPlainText()))
+        if loose:
+            # The junk list is read before the secret list, so an include here could
+            # let a secret file through to Google Drive.
+            QMessageBox.warning(self, "Not saved",
+                                "Remove the include rules first; they could let secret "
+                                "files through to Google Drive:\n" + "\n".join(loose))
+            return
         EXCLUDES_FILE.write_text(self.edit.toPlainText())
         self.accept()
 
     def preview_matches(self):
-        patterns = [l.strip() for l in self.edit.toPlainText().splitlines()
-                    if l.strip() and not l.startswith("#")]
-        if not patterns:
-            QMessageBox.information(self, "No patterns", "No exclude patterns to preview.")
-            return
+        """What the Google Drive copy keeps out of the first 3 folders, by the same rules
+        rsync uses: the patterns in the editor, then secret_name_patterns.txt, with
+        *.example / *.sample / *.template let through first (backup_filter)."""
+        patterns = backup_filter.read_patterns_text(self.edit.toPlainText())
+        secrets_file = BACKUP_DIR / backup_filter.SECRETS_NAME
+        try:
+            secret_patterns = backup_filter.read_patterns(secrets_file)
+        except (OSError, ValueError):
+            secret_patterns = []
+        if not secret_patterns:
+            QMessageBox.warning(
+                self, "Secret filter missing",
+                f"{secrets_file} is missing or empty, so the backup would not keep "
+                "secret files out. The one-folder backup refuses to run until it is back.")
+        rules = backup_filter.preview_rules(patterns, secret_patterns)
         folders = read_folders()[:3]
         matches = []
         for folder in folders:
-            src = str(DOCS / folder)
-            for pat in patterns[:15]:
-                rc, out, _ = run_cmd(
-                    ["find", src, "-name", pat, "-maxdepth", "6"], timeout=10)
-                for line in (out.strip().splitlines() or []):
-                    matches.append(line)
-                    if len(matches) >= 200:
-                        break
-                if len(matches) >= 200:
-                    break
+            for rel, secret in backup_filter.excluded_paths(
+                    DOCS / folder, rules, limit=200 - len(matches)):
+                tag = "  [secret: never sent to Google Drive]" if secret else ""
+                matches.append(f"{folder}/{rel}{tag}")
+            if len(matches) >= 200:
+                break
         dlg = QDialog(self)
         dlg.setWindowTitle("Exclude pattern matches")
         dlg.resize(700, 420)
         v = QVBoxLayout(dlg)
-        note = f"{len(matches)} paths matched across first {len(folders)} folder(s)" + \
-               (" (truncated)" if len(matches) >= 200 else "")
-        v.addWidget(QLabel(note if matches else "No matches found in the first 3 backed-up folders."))
+        note = (f"{len(matches)} paths kept out of the Google Drive copy in the first "
+                f"{len(folders)} folder(s)" + (" (truncated)" if len(matches) >= 200 else "")
+                + ". Junk patterns from this editor; secret names from "
+                f"{backup_filter.SECRETS_NAME}; *.example, *.sample, *.template are always copied.")
+        empty = "Nothing is kept out of the first 3 backed-up folders."
+        lbl = QLabel(note if matches else empty)
+        lbl.setWordWrap(True)
+        v.addWidget(lbl)
         viewer = QPlainTextEdit()
         viewer.setReadOnly(True)
         viewer.setPlainText("\n".join(matches) or "(no matches)")
@@ -2588,8 +2625,16 @@ class BackupStatusCard(Card):
         if not DRIVE_ROOT.exists():
             self.status_lbl.setText("⚠ Google Drive not mounted — cannot run backup.")
             return
-        src = str(DOCS / folder) + "/"
-        dest = str(DEST_ROOT / folder) + "/"
+        try:
+            args = single_folder_rsync_args(folder)
+        except backup_filter.FilterError as e:
+            # Fail closed: without the secret filter this path copied .env files to
+            # Google Drive in plaintext (readiness audit B1).
+            self.status_lbl.setText("⚠ Folder backup not started: the secret filter is unavailable.")
+            QMessageBox.warning(self, "Backup not started",
+                                "The folder was not backed up, so no secret file could be "
+                                f"copied to Google Drive.\n\n{e}")
+            return
         self._dry_run = False
         self._paused = False
         self.log.clear()
@@ -2602,13 +2647,7 @@ class BackupStatusCard(Card):
         self.dry_btn.setEnabled(False)
         self.pause_btn.setEnabled(True)
         self.stop_btn.setEnabled(True)
-        self.proc.start("/opt/homebrew/bin/rsync", [
-            "-rltvh", "--update", "--modify-window=2",
-            "--no-perms", "--no-owner", "--no-group",
-            f"--exclude-from={EXCLUDES_FILE}",
-            "--stats", "--itemize-changes",
-            src, dest,
-        ])
+        self.proc.start(RSYNC, args)
         self.runs_changed.emit()
 
     def refresh_status(self):
