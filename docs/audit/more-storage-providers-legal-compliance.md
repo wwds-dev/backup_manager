@@ -239,3 +239,57 @@ owner sign-off; fill in your real name and reason):
 ```
 python3 docs/foundry/tooling/legal_gate.py sign . --by "<your name>" --role owner --scope "more-storage-providers: OneDrive, Drive split, Proton tile" --accept-risk "<why the name risk is accepted>"
 ```
+
+## 11. Re-check against `main` at 26b580d (review pass, 2026-11-20)
+Second legal-compliance pass over the draft above (draft commit `90a216d` on `claude/adoring-goodall-5b62b5`,
+carried here unchanged). Still a DRAFT, not legal advice; nothing signed, approved or "compliant". Not
+re-fetched: provider pages (section 4 dates stand). Evidence: `git diff 4288539 main --stat`, greps on `main`.
+
+**What changed since the draft's code state (4288539):** only docs, tests and one UI string
+(`cloud_quota.py` +/-2 lines, `3c3a745`: Proton text "no quota API this app can use"); `4288539` is an
+ancestor of `main`. Sections 1, 2 and 4 are unaffected. The draft's code citations were re-grepped on `main`:
+loopback bind `cloud_quota.py:287`, scope `:487`, Graph URL `:488`, `authuser` `:666`, `disconnect` `:207`,
+Proton text `:643`: all match. The Secure fixes (state/PKCE for Google and Dropbox, listener timeout, atomic
+0600 credentials and 0700 folder, error text without bodies) are in `main` and the privacy-pack rows already
+describe the atomic write and 0700 folder (`privacy.md:44`).
+
+**Status of the draft's findings on `main`:**
+| Finding | Status | Evidence |
+|---|---|---|
+| P2-1 no privacy notice | **Closed in text**, claim not measured | `README.md:780-797` (Privacy section, Google/Dropbox/Microsoft revoke links added, "not yet measured with a network trace"). The network trace is still the owner's open item. |
+| P2-2 "Proton has no public API" | **Closed** | `README.md:69,468`, `cloud_quota.py:643` |
+| P2-3 non-affiliation / own risk | **Closed in text** | `README.md:799-806` names Google, Dropbox, Microsoft, Proton, Apple, Qt; no logos. Company names still unchecked against a register (TODO). |
+| P3-1 Google 7-day Testing expiry | **Closed in text** | `README.md:119-121` (flagged "not checked with a live account") |
+| P3-2 Entra display name | **Open** | `README.md:135` still says name the registration "Backup Control Center" (feeds the open name trigger). One-line fix: "any name you like". |
+| P3-3 disconnect does not revoke | **Open, disclosed** | `cloud_quota.py:207-213`; README Privacy says removal is local only |
+| P3-4 Microsoft s.3(e) | Open, watch item | unchanged |
+| P3-5 MSRC line in SECURITY.md | **Open** | `grep -i "microsoft\|msrc" SECURITY.md` = no hit |
+| P3-6 placeholder sign-off record | **Open** (owner) | `signoff.jsonl` line 1 |
+| P3-7 DPF status not verified | **Open** | unchanged |
+
+**New points from this pass**
+- N1 (P3): the pack in the HQ (`docs/legal` link) was last edited for the draft; its hash is
+  `4140596825d2` and `legal_gate.py status` (run 2026-11-20 on this checkout's main repo) says BLOCKED: pack
+  changed since the 2026-11-18 sign-off. Expected, not an error: a person must re-sign. I did not edit the
+  pack in this pass.
+- N2 (P3): `register.md:26` says "merged at `4288539`"; the merged head is now `26b580d`. Cosmetic; update when
+  the owner next touches the register.
+- N3: the README's "nothing else is sent" is stated as design, not measured. Keep that wording until the
+  network trace is done (TODO item exists); do not strengthen it.
+- N4: no `LICENSE`-side change is needed: dependency diff is empty (section 1), no logos or fonts added.
+  `app-context.md` still has an unfilled placeholder (Invariants/Models used text) the session-start hook
+  flags; tell the owner, not a legal item.
+- Lawyer triggers: unchanged. The only open `- [ ] LAWYER:` line is the name trigger (`register.md:72`,
+  GoodSync). No new one.
+
+**Radar check (Comply scope):** not run as a command in this session (the `/radar-check` skill proposes
+only and installs nothing; I did not invoke it). Nothing in this pass depends on new tools; if the owner
+wants it before sign-off, run `/radar-check comply` from the main checkout.
+
+### Sign-off list for the owner (tier `public`: owner signs; no lawyer required except the existing name trigger)
+1. Run the network trace behind "no server, nothing sent" (README Privacy, TODO) and check the company names
+   (Proton AG, Dropbox, Inc.) against a register.
+2. Decide P3-2 (Entra display name wording), P3-3 (revoke at provider vs rename "Disconnect"), P3-5 (MSRC line).
+3. Resolve or accept the name trigger (GoodSync); fill the real name and reason in the sign-off record (P3-6).
+4. Sign yourself (I did not run it), after the above:
+   `python3 docs/foundry/tooling/legal_gate.py sign . --by "<your name>" --role owner --scope "more-storage-providers" --accept-risk "<why the name risk is accepted>"`
