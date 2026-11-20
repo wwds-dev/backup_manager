@@ -334,3 +334,20 @@ def test_token_exchange_error_with_a_non_json_body(monkeypatch, provider):
 def test_error_text_ignores_odd_error_fields(body):
     text = cloud_quota._oauth_error_text(Resp(400, body))
     assert text == "HTTP 400"
+
+
+def test_first_sign_in_response_wins_over_a_later_one():
+    port = _free_port()
+    t, box = _start_wait(port, timeout=10)
+    late = socket.create_connection(("127.0.0.1", port), timeout=3)
+    try:
+        late.sendall(b"GET /?code=late&state=late HTTP/1.0\r\n")  # headers not finished yet
+        time.sleep(0.1)
+        _get(port, "/?code=first&state=first")
+        t.join(5)
+        late.sendall(b"Host: localhost\r\n\r\n")  # the later response lands after the first
+        late.recv(4096)
+        time.sleep(0.1)
+        assert box["result"]["code"] == ["first"] and box["result"]["state"] == ["first"]
+    finally:
+        late.close()
