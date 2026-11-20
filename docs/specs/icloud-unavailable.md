@@ -76,3 +76,10 @@ P3-4 (phase order) left as is on the owner's word.
 - Tests: 2 new, 3 tightened; 5 mutations caught (including the one the review found surviving).
   Full suite: no failures; pytest still exits 139 at interpreter teardown (known TODO item).
   The suite left the live `icloud_du.log` untouched (mtime unchanged).
+- QA re-check (`qa-engineer` agent, read-only, commit 403cff1): pass. 12 crafted stdout/stderr
+  inputs leak no path into the log; behaviour preserved (int / exact int / PartialBytes / None);
+  `-k icloud` 19 passed; full suite 375 passed, 1 skipped, 0 failed (exit 139 at teardown, known);
+  4 own mutations caught; `main.py` left identical to HEAD.
+- New P3 from QA, not fixed (owner to decide): a file name containing both ": " and a newline can
+  put a fragment of that name (never a full path, names cannot contain "/") into `err=`
+  (`main.py:927`, logged at :957). Possible fix: log `err=` only for known strerror texts.
