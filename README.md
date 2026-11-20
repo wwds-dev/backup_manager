@@ -33,7 +33,8 @@ only while the Overview is on screen; switching pages never waits on them.
   runs the Google Drive backup (same as **▶ Run backup now**).
 - **Storage gauges**: Mac disk, Google Drive, Dropbox and iCloud, each with % used and a
   fill bar: green, amber at 70 %, red at 90 % (the Storage tiles' thresholds). A service
-  not set up on this Mac shows "—".
+  not set up on this Mac shows "—". A **OneDrive** gauge is added only while a OneDrive
+  tile exists, so the row is unchanged if you have none. Proton Drive never gets a gauge.
 - **Backup jobs**, each with its schedule or last result and a status pill:
   - **Google Drive mirror**: nightly time and the last good copy's age. Up to date within
     25 h (the menu-bar icon's line), Overdue after that, Errors when the last run failed,
@@ -56,22 +57,84 @@ only while the Overview is on screen; switching pages never waits on them.
 ---
 
 ### Storage
-Local Disk, Google Drive, Dropbox, and iCloud Drive tiles — each with a fill bar
-(amber at 70 %, red at 90 %). Google Drive and Dropbox show real cloud quota once
-connected via OAuth; iCloud shows local cache size only (Apple publishes no quota API).
+Tiles for Local Disk, Google Drive, Dropbox, OneDrive, iCloud Drive and Proton Drive, each
+with a fill bar (amber at 70 %, red at 90 %) where a number exists. A tile appears when its
+folder is mounted in `~/Library/CloudStorage` (a folder named `GoogleDrive-…`, `Dropbox…`,
+`OneDrive-…` or `ProtonDrive-…`) or when you add the account by hand.
+
+| Provider | What the tile shows |
+|---|---|
+| Google Drive, Dropbox, OneDrive | Real account quota ("X used of Y") once connected through OAuth (the sign-in flow where you approve access in your browser). Until connected, the mounted tile shows local disk space, labelled "(local disk)". |
+| iCloud Drive | Local cache size only, measured with `du` (Apple publishes no quota API). |
+| Proton Drive | Link only: the fixed text "No quota available (Proton has no public API)". No bar, no percentage, no gauge, and no local-disk number. It is shown when a `ProtonDrive-*` folder is mounted or you add it by hand (**+ Add account**, "Proton Drive (link only, no quota)"; no sign-in needed). |
+
 Unmounted drives are hidden. Duplicate CloudStorage mounts for the same account are
 deduplicated. Tiles auto-refresh every 5 minutes **and** immediately when the Mac
 reconnects to the network. If a connected account's quota cannot be read (network,
 timeout, rate limit), its tile shows the last known value marked "as of <time>", or
-"Account quota unavailable" — never the Mac disk's numbers. Tiles of accounts that are not
-connected yet show local disk space, labelled "(local disk)".
+"Account quota unavailable" — never the Mac disk's numbers. If a provider reports a total of
+0 or a total that is not a number (the OneDrive call maps these to 0), the tile reads
+"X used (total not reported)" with no percentage; only a provider that leaves the total
+out entirely reads "(unlimited plan)".
 
-- **☁ Cloud accounts…** — enter a Google OAuth Client ID/Secret or Dropbox App
-  Key/Secret once; Connect each mount to show real used/total quota. Expired tokens
+**One link on every tile.** Each tile has one quick-access link, taken from a fixed list in
+the app and never from anything an account returns: **Open in Finder** when the folder is
+mounted, otherwise **Open <provider> provider page** (for example `drive.google.com`,
+`dropbox.com/home`, `onedrive.live.com`, `drive.proton.me`, `icloud.com/iclouddrive`).
+Only Google can pick the account from the address: for a Google tile whose account is a
+plain email address the link is `https://drive.google.com/?authuser=<email>` and the label
+reads "Open this account in browser". Whether Google honours `authuser` for every account
+is **unverified**; the other providers' pages open on whichever account your browser is
+signed in to. With several accounts of one provider, each tile has its own link.
+
+**Google Drive split.** Under a connected Google tile's bar, two extra lines appear when
+Google's reply includes the Drive figure:
+- `Drive files <size>`, with `· trash <size>` added only when Google sent a trash figure.
+  Both are values Google reports (`usageInDrive` and `usageInDriveTrash` from the Drive API).
+- `Photos, Gmail and other <size>`: **a computed difference** (total used minus Drive
+  files), not a value read from Google. Google's API does not split Photos from Gmail, so
+  the line never says "Photos" alone.
+
+If the Drive figure is missing, or larger than the total, neither line shows and the tile
+keeps its single number. Trash is shown on its own line and is not subtracted again.
+**Unverified:** Google does not document whether `usageInDrive` already includes the trash,
+and the formula has not been checked against a real account's `storageQuota` (not read yet,
+it needs the owner's go-ahead). The split is kept in the quota history, so a failed call
+shows the old split with its "as of" time.
+
+- **☁ Cloud accounts…** — enter each provider's one-time app details: a Google Client
+  ID/Secret, a Dropbox App Key/Secret, or a OneDrive Client ID (no secret), then **Save
+  credentials**. Connect each mount to show real used/total quota. Expired tokens
   show a red "Token expired — reconnect →" link.
-- **+ Add account** — monitor a quota-enabled account that has no local mount.
-- Connected Google Drive and Dropbox tiles show a **quota sparkline** (last 60 samples)
+- **+ Add account** — monitor a quota-enabled account that has no local mount, or add a
+  Proton Drive link tile.
+- Connected tiles with a known total show a **quota sparkline** (last 60 samples)
   drawn below the fill bar so you can see whether usage is growing.
+
+#### One-time OneDrive setup
+OneDrive needs an app registration that only you can create. Steps from the design notes
+(`docs/specs/more-storage-providers.md` section 1b); the vendor's portal wording and
+whether a personal account is accepted are **unverified**, because no live sign-in has been
+run:
+1. Sign in at `entra.microsoft.com` (Microsoft's identity admin site; `portal.azure.com`
+   also works) and open **App registrations** -> **New registration**. A personal
+   Microsoft account may first need a free Entra tenant; the portal offers to create one.
+2. Name it "Backup Control Center". For supported account types choose "Accounts in any
+   organizational directory and personal Microsoft accounts".
+3. Add a platform: **Mobile and desktop applications** (a *public client*, meaning an app
+   that cannot keep a secret), with the redirect `http://localhost`. The app sends
+   `http://localhost:53789/`; Microsoft is expected to ignore the port on a registered
+   `http://localhost` (unverified).
+4. Under **API permissions** add Microsoft Graph, **Delegated**, `Files.Read` and
+   `offline_access`. A work or school account may need an administrator to consent.
+5. Copy the **Application (client) ID**. There is no client secret.
+6. In the app open **☁ Cloud accounts…**, paste it into **OneDrive Client ID:**, click
+   **Save credentials**, then **Connect** the OneDrive mount (or use **+ Add account** ->
+   OneDrive for an unmounted one) and approve access in the browser.
+
+`Files.Read` is wider than the read-only scope Google uses (it lets the app read file
+contents, though the app only asks Microsoft for the quota figure; per the design notes, not re-checked against Microsoft's documentation). OneDrive's "used"
+number is what OneDrive reports, which can include system-used space, not a sum of your files.
 
 ---
 
@@ -390,7 +453,8 @@ MIRROR=1 ~/Documents/lab/_Admin/backup/backup_to_gdrive.sh             # apply
 - Does not reconfigure the proprietary sync engines of iCloud, Google Drive, Dropbox,
   or Proton Drive — those stay in their own apps.
 - **iCloud Drive and Proton Drive will never show real cloud quota.** No public API
-  exists. The iCloud tile shows local cache size only via `du`.
+  exists. The iCloud tile shows local cache size only via `du`; the Proton tile shows
+  no number at all, only its link.
 - **Sleep mode suspends everything.** No timer, app, or background process runs while
   the Mac is asleep. Enable **⏰ Wake Mac** so the Mac wakes itself before the scheduled time.
 
@@ -455,9 +519,10 @@ All persistent data lives in:
 ```
 | File | Contents |
 |---|---|
-| `app_credentials.json` | OAuth Client ID/Secret (Google) and App Key/Secret (Dropbox) |
-| `tokens.json` | Per-account OAuth refresh tokens |
-| `manual_accounts.json` | Accounts added via + Add account |
+| `app_credentials.json` | OAuth Client ID/Secret (Google), App Key/Secret (Dropbox) and the Client ID (OneDrive, under `onedrive`; no secret) |
+| `tokens.json` | Per-account OAuth refresh tokens (mode 600). OneDrive entries carry `"provider": "onedrive"`; Microsoft returns a new refresh token on refresh and the app stores it |
+| `manual_accounts.json` | Accounts added via + Add account (including Proton link tiles) |
+| `quota_history.json` | Quota samples for the sparkline; a Google sample may also carry optional `drive` and `trash` keys (older samples without them still read) |
 | `state.json` | Notification cooldown timestamp, settings preferences |
 | `lab_health_ignore.json` | Projects whose missing-manifest warning is silenced |
 | `lab_health_settings.json` | Lab Health thresholds (`env_idle_days`, `project_idle_days`) |
@@ -605,7 +670,7 @@ Never use `QThread.terminate()`. Reviewed in `docs/audit/qthread-lifetime-review
 | `lab_root_checks.py` | Qt-free, read-only rules R1-R6 for the Lab root table in 🗂 Workspace (what sits at the lab root that should not) |
 | `workspace.py` | Qt-free worktree rules for 🌿 Worktrees: gates, scan, restore record, removal |
 | `lab_health.py` | Qt-free Lab Health rules: cleanup, env use detection, rebuild records, commit warnings, thresholds, other caches |
-| `cloud_quota.py` | Google Drive / Dropbox OAuth and quota, manual accounts, the app-support folder (`SECRETS_DIR`) |
+| `cloud_quota.py` | Provider registry (`PROVIDERS`: Google Drive, Dropbox, OneDrive, Proton, iCloud), OAuth and quota calls, the Google Drive split rule, manual accounts, the app-support folder (`SECRETS_DIR`) |
 | `backup_filter.py` | Qt-free rsync filter for every copy to Google Drive, read from `backup_to_gdrive.sh`; fails closed |
 | `verify.py` | Backup spot-check library (not wired into the app yet) |
 | `appkit_guard.py` | macOS 27 `clickCount` guard, copied from Lab Hub |
@@ -644,7 +709,12 @@ checks: selection, ticking, tooltips),
 escape as windows), `test_resizable_columns.py`, `test_scroll_latching.py`,
 `test_time_machine.py` (`tmutil` parsing), `test_wake_schedule.py` (`pmset` parsing) and
 `test_overview.py` (the Overview's rules: storage thresholds, git_autosync state files,
-job pills, the banner, the Lab Health summary, plus the gauge widget).
+job pills, the banner, the Lab Health summary, plus the gauge widget). The storage-provider
+work has its own files, all with fake network replies (no live sign-in):
+`test_drive_split.py` (the Google Drive split rule, history keys, tile lines),
+`test_provider_registry.py` (the `PROVIDERS` registry and its dispatch), `test_onedrive.py`
+(sign-in with `state` check, refresh-token rotation and its atomic 0600 write, quota
+rendering, gauge) and `test_tile_links.py` (the Proton link-only tile and the per-tile links).
 
 ## Backlog
 - **Developer ID code signing** — eliminates the need to re-grant FDA after each rebuild
