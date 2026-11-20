@@ -985,6 +985,8 @@ def split_tile_name(name):
     if name.startswith("Dropbox"):
         account = name[len("Dropbox"):].strip()
         return "Dropbox", account
+    if name.startswith("OneDrive-"):
+        return "OneDrive", name[len("OneDrive-"):]
     return name, ""
 
 
@@ -2347,7 +2349,8 @@ class CloudAccountsDialog(QDialog):
         manual = cloud_quota.load_manual_accounts()
 
         if not mounted and not manual:
-            self.rows_box.addWidget(QLabel("No Google Drive / Dropbox mounts or added accounts found."))
+            names = " / ".join(p.label for p in cloud_quota.quota_providers())
+            self.rows_box.addWidget(QLabel(f"No {names} mounts or added accounts found."))
             return
 
         if mounted:
@@ -5210,6 +5213,7 @@ class OverviewPage(QWidget):
     storage tiles, the Time Machine card's state, the Lab Health scan.
     """
     navigate = Signal(str)  # page key
+    _OPTIONAL_GAUGES = ("onedrive",)  # registry keys shown only while an account exists
 
     def __init__(self, window):
         super().__init__()
@@ -5264,6 +5268,7 @@ class OverviewPage(QWidget):
             self.gauges[key] = g
             grid.addWidget(g, 0, col)
             grid.setColumnStretch(col, 1)
+        self._gauge_grid = grid
         v.addLayout(grid)
 
         # Backup jobs | Needs attention
@@ -5315,8 +5320,22 @@ class OverviewPage(QWidget):
             else:
                 key = getattr(t, "provider", None) or "disk"
             groups.setdefault(key, []).append(t)
+        # Providers beyond the four fixed slots get a gauge only while an account exists.
+        for key in self._OPTIONAL_GAUGES:
+            present = bool(groups.get(key))
+            gauge = self.gauges.get(key)
+            if present and gauge is None:
+                gauge = Gauge(cloud_quota.PROVIDERS[key].label)
+                col = self._gauge_grid.columnCount()
+                self._gauge_grid.addWidget(gauge, 0, col)
+                self._gauge_grid.setColumnStretch(col, 1)
+                self.gauges[key] = gauge
+            if gauge is not None:
+                gauge.setVisible(present)
         for key, gauge in self.gauges.items():
             tiles = groups.get(key)
+            if key in self._OPTIONAL_GAUGES and not tiles:
+                continue
             if not tiles:
                 gauge.set_value(None, "Not set up on this Mac")
                 continue

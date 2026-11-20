@@ -29,6 +29,7 @@ import http.server
 import json
 import os
 import secrets
+import tempfile
 import threading
 import urllib.parse
 import webbrowser
@@ -107,12 +108,66 @@ def save_app_credentials(data):
     _write_json(CREDENTIALS_FILE, data)
 
 
+def _write_json_atomic(path, data):
+    """Write `data` to `path` as 0600 via a temp file in the same folder and os.replace,
+    so a reader never sees a half-written file and a failed write leaves the old one."""
+    SECRETS_DIR.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps(data, indent=2))
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+# Every read-modify-write of tokens.json holds this lock, so two writers (a refresh
+# storing a rotated token, a connect, a disconnect) cannot lose each other's change.
+_TOKENS_LOCK = threading.RLock()
+
+
 def load_tokens():
     return _read_json(TOKENS_FILE)
 
 
 def save_tokens(data):
-    _write_json(TOKENS_FILE, data)
+    with _TOKENS_LOCK:
+        _write_json_atomic(TOKENS_FILE, data)
+
+
+def _set_token_entry(account_key, entry):
+    with _TOKENS_LOCK:
+        tokens = load_tokens()
+        tokens[account_key] = entry
+        save_tokens(tokens)
+
+
+def _store_refresh_token(account_key, new_token):
+    """Store a rotated refresh token for an existing account, keeping its other fields."""
+    with _TOKENS_LOCK:
+        tokens = load_tokens()
+        entry = dict(tokens.get(account_key) or {})
+        entry["refresh_token"] = new_token
+        tokens[account_key] = entry
+        save_tokens(tokens)
+
+
+_refresh_locks = {}
+_refresh_locks_guard = threading.Lock()
+
+
+def _refresh_lock(account_key):
+    """One lock per account around refresh-then-store: with single-use refresh tokens two
+    overlapping refreshes would otherwise send the same token and one would be rejected."""
+    with _refresh_locks_guard:
+        return _refresh_locks.setdefault(account_key, threading.Lock())
 
 
 def is_connected(account_key):
@@ -144,9 +199,10 @@ def remove_manual_account(key):
 
 
 def disconnect(account_key):
-    tokens = load_tokens()
-    tokens.pop(account_key, None)
-    save_tokens(tokens)
+    with _TOKENS_LOCK:
+        tokens = load_tokens()
+        tokens.pop(account_key, None)
+        save_tokens(tokens)
 
 
 # ----------------------------------------------------------------------------
@@ -246,9 +302,7 @@ def google_connect(account_key):
     if not refresh_token:
         return False, "Google did not return a refresh token (try disconnecting app access in your Google Account and reconnecting)."
 
-    tokens = load_tokens()
-    tokens[account_key] = {"provider": "google", "refresh_token": refresh_token}
-    save_tokens(tokens)
+    _set_token_entry(account_key, {"provider": "google", "refresh_token": refresh_token})
     return True, None
 
 
@@ -332,9 +386,7 @@ def dropbox_connect(account_key):
     if not refresh_token:
         return False, "Dropbox did not return a refresh token."
 
-    tokens = load_tokens()
-    tokens[account_key] = {"provider": "dropbox", "refresh_token": refresh_token}
-    save_tokens(tokens)
+    _set_token_entry(account_key, {"provider": "dropbox", "refresh_token": refresh_token})
     return True, None
 
 
@@ -391,6 +443,118 @@ def dropbox_quota(account_key):
 
 
 # ----------------------------------------------------------------------------
+# OneDrive (Microsoft Graph). Public client: PKCE, no secret; only the client ID
+# is stored. Entra matches any port on a registered http://localhost redirect.
+# Microsoft returns a new refresh token on refresh; it is stored each time.
+# ----------------------------------------------------------------------------
+ONEDRIVE_AUTHORITY = "https://login.microsoftonline.com/common/oauth2/v2.0"
+ONEDRIVE_AUTH_URL = f"{ONEDRIVE_AUTHORITY}/authorize"
+ONEDRIVE_TOKEN_URL = f"{ONEDRIVE_AUTHORITY}/token"
+ONEDRIVE_SCOPE = "Files.Read offline_access"
+ONEDRIVE_DRIVE_URL = "https://graph.microsoft.com/v1.0/me/drive"
+
+
+def _redirect_code(result, expected_state):
+    """(code, error) from the redirect query. The code is used only when `state` matches."""
+    got = (result.get("state") or [""])[0]
+    if not got or not secrets.compare_digest(got, expected_state):
+        return None, "Sign-in response did not match this request (state check failed). Try again."
+    code = (result.get("code") or [None])[0]
+    if not code:
+        return None, "No authorization code received (timed out or denied)."
+    return code, None
+
+
+def _oauth_error_text(resp):
+    """Short error from a token endpoint: the error code only, never the body (it can echo
+    the authorization code or a token)."""
+    try:
+        err = resp.json().get("error")
+    except ValueError:
+        err = None
+    return f"HTTP {resp.status_code}" + (f" ({err})" if isinstance(err, str) else "")
+
+
+def onedrive_connect(account_key):
+    creds = load_app_credentials().get("onedrive")
+    if not creds or not creds.get("client_id"):
+        return False, "No OneDrive Client ID saved yet."
+    client_id = creds["client_id"]
+    verifier, challenge = _pkce_pair()
+    state = secrets.token_urlsafe(32)
+    params = {
+        "client_id": client_id,
+        "response_type": "code",
+        "redirect_uri": REDIRECT_URI,
+        "response_mode": "query",
+        "scope": ONEDRIVE_SCOPE,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+        "state": state,
+    }
+    webbrowser.open(f"{ONEDRIVE_AUTH_URL}?{urllib.parse.urlencode(params)}")
+    code, error = _redirect_code(_wait_for_redirect(REDIRECT_PORT), state)
+    if error:
+        return False, error
+
+    resp = requests.post(ONEDRIVE_TOKEN_URL, data={
+        "client_id": client_id,
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": REDIRECT_URI,
+        "code_verifier": verifier,
+        "scope": ONEDRIVE_SCOPE,
+    }, timeout=20)
+    if resp.status_code != 200:
+        return False, f"Token exchange failed: {_oauth_error_text(resp)}"
+    refresh_token = resp.json().get("refresh_token")
+    if not refresh_token:
+        return False, "Microsoft did not return a refresh token (is offline_access granted?)."
+    _set_token_entry(account_key, {"provider": "onedrive", "refresh_token": refresh_token})
+    return True, None
+
+
+def _onedrive_access_token(account_key):
+    """Access token for the account. Holds the account's refresh lock across read, refresh and
+    store, so a second caller waits and then sends the rotated token."""
+    with _refresh_lock(account_key):
+        entry = load_tokens().get(account_key)
+        if not entry:
+            raise RuntimeError("OneDrive account is not connected.")
+        creds = load_app_credentials().get("onedrive") or {}
+        resp = requests.post(ONEDRIVE_TOKEN_URL, data={
+            "client_id": creds.get("client_id", ""),
+            "grant_type": "refresh_token",
+            "refresh_token": entry["refresh_token"],
+            "scope": ONEDRIVE_SCOPE,
+        }, timeout=20)
+        resp.raise_for_status()
+        data = resp.json()
+        new_rt = data.get("refresh_token")
+        if new_rt and new_rt != entry["refresh_token"]:
+            _store_refresh_token(account_key, new_rt)
+        return data["access_token"]
+
+
+def onedrive_quota(account_key):
+    """Returns Quota(used, total_or_None) as OneDrive reports it, or raises on error."""
+    if not load_tokens().get(account_key):
+        return None
+    access_token = _onedrive_access_token(account_key)
+    resp = requests.get(
+        ONEDRIVE_DRIVE_URL,
+        params={"$select": "quota"},
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=20,
+    )
+    resp.raise_for_status()
+    q = resp.json().get("quota") or {}
+    used = int(q.get("used", 0))
+    total = int(q["total"]) if q.get("total") else None
+    return Quota(used, total)
+
+
+# ----------------------------------------------------------------------------
 # Provider registry. One entry per provider; the app's provider lists, credential
 # form, mount detection and dispatch all read it. URLs are literals here and are
 # the only URLs the app opens for a provider (never one from an API response).
@@ -423,6 +587,11 @@ PROVIDERS = {
                            ("app_secret", "Dropbox App Secret:", True)),
         connect="dropbox_connect", quota="dropbox_quota",
         account_email="dropbox_account_email",
+    ),
+    "onedrive": Provider(
+        "onedrive", "OneDrive", "OneDrive", "https://onedrive.live.com/",
+        credential_fields=(("client_id", "OneDrive Client ID:", False),),
+        connect="onedrive_connect", quota="onedrive_quota",
     ),
 }
 
