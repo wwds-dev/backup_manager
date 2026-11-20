@@ -77,3 +77,4 @@
 {"ts": "2026-11-20T18:58:30", "phase": "verify", "state": "start", "spec": "more-storage-providers"}
 {"ts": "2026-11-20T19:15:49", "phase": "verify", "state": "done", "spec": "more-storage-providers"}
 {"ts": "2026-11-20T19:36:27", "phase": "document", "state": "done", "spec": "more-storage-providers"}
+{"ts": "2026-11-20T20:40:13", "phase": "release", "state": "start"}
