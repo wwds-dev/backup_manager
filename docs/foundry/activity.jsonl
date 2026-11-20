@@ -37,3 +37,4 @@
 {"ts": "2026-11-20T13:33:41", "phase": "build", "state": "done", "spec": "quota-fallback-last-known"}
 {"ts": "2026-11-20T13:35:21", "phase": "release", "state": "start", "spec": "quota-fallback-last-known"}
 {"ts": "2026-11-20T13:35:57", "phase": "release", "state": "done", "spec": "quota-fallback-last-known"}
+{"ts": "2026-11-20T13:41:57", "phase": "define", "state": "start", "spec": "quota-off-ui-thread"}
