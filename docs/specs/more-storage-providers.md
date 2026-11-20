@@ -216,3 +216,33 @@ registry-only URLs opened.
 
 ## Architect approval
 Approved by the owner 2026-11-20 ("Approve"). Build may start.
+
+## Build log (2026-11-20, engineer session, branch `claude/wizardly-payne-caa30e`)
+
+Spec, Define and Architect approvals came from `claude/zealous-burnell-c2116b` (merged here, docs only).
+Four commits, tests first, in the Architect's build order:
+
+| Step | Commit | What | Tests |
+|---|---|---|---|
+| 1 | `cc8576e` | `drive_split`, `Quota` tuple subclass, optional `drive`/`trash` history keys, `_last_known_split`, Google tile lines "Drive files … · trash …" and "Photos, Gmail and other …" (tooltip: total minus Drive files) | `tests/test_drive_split.py` |
+| 2 | `ee0b4cc` | `PROVIDERS` registry: `provider_for_name`, `connect`/`quota`/`account_email` dispatch (late-bound by name), Add Account combo, credential form (save now keeps unknown keys), tile label | `tests/test_provider_registry.py` |
+| 3 | `698500a` | OneDrive: PKCE public client, no secret, `state` (32 bytes, `compare_digest`) checked before the code is exchanged; token-endpoint errors show only the OAuth error code; refresh under a per-account lock, rotated token stored via atomic write (`mkstemp` in the same dir, `fchmod 0600`, `fsync`, `os.replace`) under one `_TOKENS_LOCK` that all `tokens.json` writes now use; Graph `/me/drive?$select=quota`; mount prefix `OneDrive`; fifth Overview gauge only while a OneDrive tile exists | `tests/test_onedrive.py` |
+| 4 | `60a66fd` | Proton and iCloud in the registry with `has_quota=False`; Proton tile (mounted or added by hand, no OAuth): fixed text, bar hidden, `pct` None, no Connect, no gauge; one Open link per tile: Finder when mounted, else registry URL (Google `?authuser=<email>` only for a plain email, URL-encoded), fixed at construction | `tests/test_tile_links.py` |
+
+**Suite:** `.venv/bin/python -m pytest -q -p no:warnings --junitxml=…` → tests=455, failures=0,
+errors=0, skipped=1 (was 392 before step 1). The process exits 139 after the last test; the same
+exit happens on the base commit `d22d4c2` before any of this work (Qt teardown at interpreter
+exit, pre-existing), so results are read from the JUnit XML, not the exit code.
+
+**Mutation check (by hand, 16 mutants, all killed):** split upper bound removed, lower bound
+removed, trash subtracted, label "Photos" alone; rotated token not stored, non-atomic write,
+mode 0644, per-account lock removed, stored entry drops `provider`; state check removed, missing
+state accepted; token-exchange error echoes the body; `authuser` not URL-encoded, no email check;
+Proton bar shown; OneDrive gauge always present.
+
+**Not done / not verified here:**
+- `state` rollout to the Google and Dropbox flows: Secure phase per Architect decision 5, not built.
+- The one read of the owner's real Google `storageQuota` (needs the owner's yes) has not run.
+- No live OneDrive sign-in: needs the owner's Entra app registration; only fakes were used.
+- No OneDrive account-name call (would need `User.Read`); the tile shows the mount or label name.
+- App not built or installed; no screenshot.
