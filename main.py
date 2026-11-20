@@ -12,6 +12,7 @@ Run:  python main.py   (needs PySide6 — see requirements.txt)
 """
 
 import sys
+import threading
 import ctypes
 import ctypes.util
 import fcntl
@@ -1575,6 +1576,8 @@ class StorageTile(QFrame):
         self._worker = None
         self._quota_worker = None
         self._quota_token = 0
+        self._quota_cancel = None
+        self._checking = False  # a quota fetch is in flight and has not landed
         self._retired = False
         self.setFixedWidth(TILE_WIDTH)
         self.setObjectName("StorageTile")
@@ -1655,6 +1658,8 @@ class StorageTile(QFrame):
         start_thread(self._worker)
 
     def _reconnect_done(self, ok, err):
+        if self._retired:
+            return
         if ok:
             self.detail_lbl.setText("Reconnected!")
             self.set_usage(self._path, self._exists)
@@ -1690,6 +1695,8 @@ class StorageTile(QFrame):
 
     def set_usage(self, path, exists):
         self.pct = None
+        self._quota_token += 1  # any fetch still in flight is now stale
+        self._checking = False
         if not exists:
             self.bar.setValue(0)
             self.detail_lbl.setText("not mounted")
@@ -1739,15 +1746,23 @@ class StorageTile(QFrame):
         self._quota_token += 1
         token = self._quota_token
         key, provider = self.account_key, self.provider
+        if self._quota_cancel is not None:
+            self._quota_cancel.set()  # the superseded fetch skips its remaining calls
+        cancel = self._quota_cancel = threading.Event()
+        self._checking = True
 
         def fetch():
             # Worker thread: network only, no widget access.
             email = None
+            if cancel.is_set():
+                return token, None, None, "cancelled"
             if provider == "dropbox":
                 try:
                     email = cloud_quota.dropbox_account_email(key)
                 except Exception:
                     email = None
+            if cancel.is_set():
+                return token, email, None, "cancelled"
             try:
                 return token, email, cloud_quota.quota(key), None
             except Exception as e:
@@ -1761,6 +1776,8 @@ class StorageTile(QFrame):
         """The card is dropping this tile: ignore any result still in flight."""
         self._retired = True
         self._quota_token += 1
+        if self._quota_cancel is not None:
+            self._quota_cancel.set()  # stop a fetch that has not made its calls yet
         w = self._quota_worker
         if w is not None:
             try:
@@ -1769,11 +1786,14 @@ class StorageTile(QFrame):
                 pass
 
     def _apply_quota(self, payload):
-        if self._retired or payload is None:
+        if self._retired:
             return
+        if payload is None:  # the worker died without a result
+            payload = (self._quota_token, None, None, "no result")
         token, email, result, quota_error = payload
         if token != self._quota_token:
             return  # an older fetch than the one in flight
+        self._checking = False
         try:
             self._render_quota(email, result, quota_error)
             self.measured.emit()
@@ -5131,8 +5151,12 @@ class OverviewPage(QWidget):
                     acct = (getattr(t, "account_lbl", None) and t.account_lbl.text()) \
                         or getattr(t, "account_key", "")
                     detail = f"{detail} · {acct} (fullest of {len(tiles)})"
-                    if len(known) < len(tiles):
-                        detail += f" · {len(tiles) - len(known)} unavailable"
+                    checking = sum(1 for x in tiles if x.pct is None and getattr(x, "_checking", False))
+                    unavailable = len(tiles) - len(known) - checking
+                    if unavailable:
+                        detail += f" · {unavailable} unavailable"
+                    if checking:
+                        detail += f" · {checking} checking"
             except RuntimeError:  # tile deleted by a refresh mid-read
                 continue
             if key == "icloud":

@@ -51,3 +51,12 @@ the failure fallback) or "Checking account quota…" with an empty bar. No new w
 **Phases skipped.** ADR (no boundary change), Secure (no new network surface: the same two calls, now
 off-thread; no secret, auth or input change), Comply and Launch (public tier, no claim or data-flow
 change). Document is a TODO row and spec log (no CHANGELOG file in this app).
+
+## Build and review log (2026-11-20)
+- Architect gate approved by the owner ("Approve"). Built as specified, plus after review: a `_checking`
+  flag so the Overview gauge says "N checking" instead of "N unavailable" mid-fetch; a cancel event so a
+  retired or superseded fetch skips its remaining network calls; `set_usage` invalidates any fetch in
+  flight; `_reconnect_done` returns on a retired tile; a worker that dies without a result renders
+  "Account quota unavailable".
+- Measured: `StorageTile` build with a fake 5 s `quota()` returns in 0.001 s.
+- Review (code-reviewer, read-only): no P0/P1; P2/P3 above fixed. Full suite green; 8 mutations caught.

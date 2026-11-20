@@ -208,3 +208,79 @@ def test_already_queued_stale_result_is_dropped(qapp, monkeypatch):
     gate.set()
     _settle(second)
     assert tile.pct == 90
+
+
+def test_superseded_fetch_skips_its_quota_call(qapp, monkeypatch):
+    """A retired or replaced fetch must not add network requests once it is cut off."""
+    gate = threading.Event()
+    in_email = threading.Event()
+    emails, quotas = [], []
+
+    def email(key):
+        emails.append(1)
+        if len(emails) == 1:
+            in_email.set()
+            gate.wait(10)
+        return None
+
+    monkeypatch.setattr(main.cloud_quota, "dropbox_account_email", email)
+    monkeypatch.setattr(main.cloud_quota, "quota", lambda key: quotas.append(1) or (1, 4))
+    tile = _tile(provider="dropbox", key="Dropbox-me")
+    first = tile._quota_worker
+    assert in_email.wait(5)
+    tile.set_usage(Path.home(), True)
+    second = tile._quota_worker
+    gate.set()
+    _settle(first)
+    _settle(second)
+    assert len(quotas) == 1, "the superseded fetch still called quota()"
+
+
+def test_retired_tile_cancels_its_pending_quota_call(qapp, monkeypatch):
+    gate = threading.Event()
+    in_email = threading.Event()
+    quotas = []
+
+    def email(key):
+        in_email.set()
+        gate.wait(10)
+
+    monkeypatch.setattr(main.cloud_quota, "dropbox_account_email", email)
+    monkeypatch.setattr(main.cloud_quota, "quota", lambda key: quotas.append(1) or (1, 4))
+    tile = _tile(provider="dropbox", key="Dropbox-me")
+    w = tile._quota_worker
+    assert in_email.wait(5)
+    tile.retire()
+    gate.set()
+    _settle(w)
+    assert quotas == []
+
+
+def test_gauge_says_checking_not_unavailable_mid_fetch(qapp, monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    _history(tmp_path, [{"ts": "2026-11-19T09:05", "used": 1, "total": 2}])
+    release = threading.Event()
+
+    def quota(key):
+        if key != KEY:
+            release.wait(10)
+        return 1, 4
+
+    monkeypatch.setattr(main.cloud_quota, "quota", quota)
+    monkeypatch.setattr(main, "_append_quota_sample", lambda *a, **k: None)
+    ok = _tile()
+    slow = _tile(key="GoogleDrive-other@example.com")
+    _settle(ok._quota_worker)
+    window = SimpleNamespace(
+        backup_card=SimpleNamespace(proc=None, _dry_run=False),
+        tm_card=SimpleNamespace(state={"configured": None}),
+        storage_card=SimpleNamespace(tiles=[ok, slow]),
+    )
+    page = main.OverviewPage(window)
+    page.refresh_gauges()
+    text = page.gauges["google"].detail_lbl.text()
+    assert "1 checking" in text and "unavailable" not in text, text
+    release.set()
+    _settle(slow._quota_worker)
+    page.refresh_gauges()
+    assert "checking" not in page.gauges["google"].detail_lbl.text()
