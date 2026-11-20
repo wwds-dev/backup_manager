@@ -918,6 +918,20 @@ def icloud_local_bytes() -> int | None:
     return None
 
 
+ICLOUD_DENIED = "icloud-denied"  # marker: macOS refused access to the iCloud folder
+
+
+def icloud_access_denied() -> bool:
+    """True when macOS privacy (Full Disk Access) refuses to list the iCloud folder."""
+    try:
+        os.listdir(HOME / "Library" / "Mobile Documents")
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
 def storage_targets():
     """(name, path, exists) for Local Disk plus mounts that can show real account
     quota (Google Drive, Dropbox). Proton Drive / iCloud Drive have no public quota
@@ -1869,9 +1883,12 @@ class ICloudTile(QFrame):
     measured = Signal()  # the du finished; pct/detail are final
 
     class _Worker(QThread):
-        done = Signal(object)  # int bytes or None
+        done = Signal(object)  # int bytes, None, or ICLOUD_DENIED
         def run(self):
-            self.done.emit(icloud_local_bytes())
+            size = icloud_local_bytes()
+            if size is None and icloud_access_denied():
+                size = ICLOUD_DENIED
+            self.done.emit(size)
 
     def __init__(self):
         super().__init__()
@@ -1919,14 +1936,15 @@ class ICloudTile(QFrame):
         self._worker.done.connect(self._on_done)
         start_thread(self._worker)
 
-    def _on_done(self, size: int | None):
+    def _on_done(self, size):
         self._apply_size(size)
         self.measured.emit()
 
-    def _apply_size(self, size: int | None):
+    def _apply_size(self, size):
         bar_bg = "#48484A" if _DARK else "#E5E5EA"
-        if size is None:
-            self.detail_lbl.setText("Unavailable")
+        if size is None or size == ICLOUD_DENIED:
+            self.detail_lbl.setText(
+                "No access (Full Disk Access)" if size == ICLOUD_DENIED else "Unavailable")
             self.bar.setStyleSheet(
                 f"QProgressBar {{ border:none; border-radius:4px; background:{bar_bg}; height:6px; }}"
                 f"QProgressBar::chunk {{ border-radius:4px; background:{bar_bg}; }}"

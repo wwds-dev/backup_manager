@@ -220,3 +220,69 @@ def test_muted_text_is_readable_on_its_backgrounds(dark):
         for bg in re.findall(r"background: (#[0-9A-Fa-f]{6})", css)[:0] or (
                 ("#1C1C1E", "#2C2C2E", "#232325") if dark else ("#F2F2F7", "#FFFFFF", "#EBEBF0")):
             assert _ratio(colour, bg) >= 4.5, (sel, colour, bg)
+
+
+# --- iCloud card: say why it is unavailable (spec icloud-unavailable) ---------
+
+def _tile_text(size):
+    t = main.ICloudTile.__new__(main.ICloudTile)
+    t.detail_lbl = main.QLabel()
+    t.bar = main.QProgressBar()
+    t.pct = None
+    t._apply_size(size)
+    return t.detail_lbl.text()
+
+
+def test_icloud_access_denied_only_on_permission_error(monkeypatch):
+    def deny(_p):
+        raise PermissionError(1, "Operation not permitted")
+    monkeypatch.setattr(main.os, "listdir", deny)
+    assert main.icloud_access_denied() is True
+
+    def missing(_p):
+        raise FileNotFoundError()
+    monkeypatch.setattr(main.os, "listdir", missing)
+    assert main.icloud_access_denied() is False
+    monkeypatch.setattr(main.os, "listdir", lambda _p: [])
+    assert main.icloud_access_denied() is False
+
+
+def test_icloud_tile_text_denied_unavailable_and_size():
+    assert _tile_text(main.ICLOUD_DENIED) == "No access (Full Disk Access)"
+    assert _tile_text(None) == "Unavailable"
+    assert "local cache" in _tile_text(2048)
+
+
+def test_icloud_worker_emits_denied_only_when_du_failed(monkeypatch):
+    got = []
+    monkeypatch.setattr(main, "icloud_access_denied", lambda: True)
+    monkeypatch.setattr(main, "icloud_local_bytes", lambda: None)
+    w = main.ICloudTile._Worker()
+    w.done.connect(got.append)
+    w.run()
+    assert got == [main.ICLOUD_DENIED]
+    got.clear()
+    monkeypatch.setattr(main, "icloud_local_bytes", lambda: 4096)
+    w.run()
+    assert got == [4096]
+
+
+def test_icloud_worker_emits_none_when_du_failed_but_not_denied(monkeypatch):
+    got = []
+    monkeypatch.setattr(main, "icloud_access_denied", lambda: False)
+    monkeypatch.setattr(main, "icloud_local_bytes", lambda: None)
+    w = main.ICloudTile._Worker()
+    w.done.connect(got.append)
+    w.run()
+    assert got == [None]
+
+
+def test_icloud_gauge_shows_denied_text(win):
+    ic = main.ICloudTile.__new__(main.ICloudTile)
+    main.QFrame.__init__(ic)
+    ic.pct, ic.detail_lbl = None, QLabel("No access (Full Disk Access)")
+    win.overview._icloud_last = None
+    win.storage_card.tiles = [ic]
+    win.overview.refresh_gauges()
+    g = win.overview.gauges["icloud"]
+    assert "No access" in g.detail_lbl.text() and g.value_lbl.text() == "—"
