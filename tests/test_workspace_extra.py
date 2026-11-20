@@ -312,3 +312,23 @@ def test_backups_sorted_offered_first_then_by_size(lab):
     mk(lab, "backups/young", 1, "z" * 9000); mk(lab, "backups/old_small", 50); mk(lab, "backups/old_big", 50, "z" * 9000)
     names = [r["path"].name for r in wx.scan_backups(lab, now=NOW)]
     assert names[-1] == "young" and set(names[:2]) == {"old_small", "old_big"}
+
+
+def test_report_has_a_lab_root_list_and_is_written_private(lab, tmp_path):
+    (lab / "AGENTS.md").write_text("`docs` `p`\n")
+    (lab / "docs" / "a.md").write_text("x")
+    (lab / "stray.txt").write_text("x")
+    rep = wx.build_report(lab, now=NOW, cwds=[])
+    assert [(f["rule"], f["rel"]) for f in rep["lab_root"]] == [("R1", "stray.txt")]
+    p = wx.write_report(rep, tmp_path / "r.json")
+    assert json.loads(p.read_text())["lab_root"][0]["rel"] == "stray.txt"
+    assert (os.stat(p).st_mode & 0o777) == 0o600
+    assert (lab / "stray.txt").exists()                  # report only: nothing moved
+    # offered totals are unchanged by lab-root findings: nothing there is offered
+    assert rep["offered_items"] == 0 and rep["offered_kb"] == 0
+
+
+def test_report_lab_root_empty_for_a_clean_lab(lab):
+    (lab / "AGENTS.md").write_text("`docs` `p`\n")
+    (lab / "docs" / "a.md").write_text("x")
+    assert wx.build_report(lab, now=NOW, cwds=[])["lab_root"] == []

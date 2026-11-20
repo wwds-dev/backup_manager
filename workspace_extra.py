@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 
 import lab_health
+import lab_root_checks
 import workspace
 
 BACKUP_MIN_DAYS = 30
@@ -271,7 +272,8 @@ def scan_due(last: float | None, now: float | None = None, days: int = WEEKLY_DA
 
 def build_report(lab_root: Path, *, min_days: int = BACKUP_MIN_DAYS, wt_days: int = workspace.MIN_AGE_DAYS,
                  now: float | None = None, cwds=workspace._AUTO, runner=None) -> dict:
-    """Read-only: counts and sizes of what is offered or kept. Deletes and moves nothing."""
+    """Read-only: counts and sizes of what is offered or kept, and the lab-root findings (docs/specs/
+    lab-root-checks.md). Deletes and moves nothing."""
     now = time.time() if now is None else now
     kw = {"runner": runner} if runner else {}
     wts = workspace.scan_worktrees(lab_root, min_days=wt_days, now=now, cwds=cwds, **kw)
@@ -284,6 +286,7 @@ def build_report(lab_root: Path, *, min_days: int = BACKUP_MIN_DAYS, wt_days: in
     return {"scanned": now, "worktrees": part(wts), "backups": part(backups),
             "archive": {"entries": len(archive), "kb": sum(r["kb"] for r in archive)},
             "caches": {"folders": len(caches), "kb": sum(r["kb"] for r in caches)},
+            "lab_root": lab_root_checks.scan(lab_root, now=now),    # report only: nothing is offered
             "offered_kb": part(wts)["offered_kb"] + part(backups)["offered_kb"]
                           + sum(r["kb"] for r in caches),
             "offered_items": part(wts)["offered"] + part(backups)["offered"] + len(caches)}
