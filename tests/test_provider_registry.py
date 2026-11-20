@@ -80,8 +80,13 @@ def test_add_account_combo_lists_quota_providers(qapp):
     labels = [dlg.provider_combo.itemText(i) for i in range(dlg.provider_combo.count())]
     assert keys[:2] == ["google", "dropbox"]
     assert labels[:2] == ["Google Drive", "Dropbox"]
-    for k in keys:
+    # Quota providers first; link-only ones (step 4: Proton) after them and labelled as such.
+    n_quota = len(cloud_quota.quota_providers())
+    for k in keys[:n_quota]:
         assert cloud_quota.PROVIDERS[k].has_quota
+    for k, label in zip(keys[n_quota:], labels[n_quota:]):
+        assert not cloud_quota.PROVIDERS[k].has_quota and "link only" in label
+    assert "icloud" not in keys  # iCloud has its own tile
 
 
 def test_credentials_form_round_trip_and_keeps_other_keys(qapp):

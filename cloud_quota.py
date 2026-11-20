@@ -28,6 +28,7 @@ import hashlib
 import http.server
 import json
 import os
+import re
 import secrets
 import tempfile
 import threading
@@ -572,6 +573,7 @@ class Provider:
     quota: str | None = None
     account_email: str | None = None
     has_quota: bool = True
+    no_quota_text: str = ""  # fixed tile text when has_quota is False
 
 
 PROVIDERS = {
@@ -593,7 +595,34 @@ PROVIDERS = {
         credential_fields=(("client_id", "OneDrive Client ID:", False),),
         connect="onedrive_connect", quota="onedrive_quota",
     ),
+    # No public quota API: link-only tile (no bar, no number, no gauge).
+    "proton": Provider(
+        "proton", "Proton Drive", "ProtonDrive", "https://drive.proton.me/", has_quota=False,
+        no_quota_text="No quota available (Proton has no public API)",
+    ),
+    # iCloud keeps its own tile (ICloudTile); the registry supplies only its link.
+    "icloud": Provider(
+        "icloud", "iCloud Drive", None, "https://www.icloud.com/iclouddrive/", has_quota=False,
+    ),
 }
+
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+
+
+def link_only_providers():
+    """Providers that can be added by hand as a link-only tile (no OAuth, no quota)."""
+    return [p for p in PROVIDERS.values() if not p.has_quota and p.mount_prefix]
+
+
+def web_link(provider, account=None):
+    """The provider's page from the registry, or None. Google gets `?authuser=<email>` when the
+    tile's account is a plain email; nothing else from outside the registry enters the URL."""
+    p = PROVIDERS.get(provider)
+    if p is None:
+        return None
+    if provider == "google" and account and _EMAIL_RE.fullmatch(account):
+        return f"{p.web_url}?authuser={urllib.parse.quote(account, safe='')}"
+    return p.web_url
 
 
 def _call(func_name, *args):

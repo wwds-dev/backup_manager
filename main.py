@@ -954,10 +954,10 @@ def icloud_access_denied() -> bool:
 
 
 def storage_targets():
-    """(name, path, exists) for Local Disk plus mounts that can show real account
-    quota (Google Drive, Dropbox). Proton Drive / iCloud Drive have no public quota
-    API, so showing them here would just repeat the Local Disk number — they're
-    left out rather than displayed as a misleading duplicate.
+    """(name, path, exists) for Local Disk plus mounts of a registry provider
+    (cloud_quota.PROVIDERS). Quota providers show the account quota; Proton Drive is a
+    link-only tile with no number (it never repeats the Local Disk figure). iCloud has
+    its own tile.
     Deduplicates by base account email — keeps the shortest (cleanest) folder name
     when Google Drive creates multiple mounts for the same account."""
     rows = [("Local Disk", HOME, True)]
@@ -1689,9 +1689,10 @@ class StorageTile(QFrame):
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(6)
 
+        self._reg = cloud_quota.PROVIDERS.get(self.provider) if self.provider else None
+        self.has_quota = self._reg.has_quota if self._reg else True
         if provider_override:
-            reg = cloud_quota.PROVIDERS.get(provider_override)
-            provider = reg.label if reg else provider_override
+            provider = self._reg.label if self._reg else provider_override
             account = display_account or ""
         else:
             provider, account = split_tile_name(name)
@@ -1742,13 +1743,28 @@ class StorageTile(QFrame):
             lbl.setVisible(False)
             self.split_lbls.append(lbl)
 
+        # One quick-access link: the mounted folder, else the provider's registry URL.
+        # The URL is fixed here from the registry and the construction-time account
+        # name; nothing an API returns later can change it.
         if path is not None and exists:
             open_btn = link_button("Open in Finder →")
             open_btn.setStyleSheet(open_btn.styleSheet() + "font-size: 10px; padding: 2px 0;")
             open_btn.clicked.connect(lambda: run_cmd(["open", str(path)]))
             layout.addWidget(open_btn)
+        elif self._reg is not None:
+            url = cloud_quota.web_link(self.provider, account)
+            if url == self._reg.web_url:
+                text = f"Open {self._reg.label} provider page →"
+            else:
+                text = "Open this account in browser →"
+            open_btn = link_button(text)
+            open_btn.setToolTip(url)
+            open_btn.setStyleSheet(open_btn.styleSheet() + "font-size: 10px; padding: 2px 0;")
+            open_btn.clicked.connect(lambda _=False, u=url: run_cmd(["open", u]))
+            layout.addWidget(open_btn)
 
-        if self.provider and exists and not cloud_quota.is_connected(self.account_key):
+        if (self.provider and self.has_quota and exists
+                and not cloud_quota.is_connected(self.account_key)):
             connect_btn = link_button("Connect for account quota →")
             connect_btn.setStyleSheet(connect_btn.styleSheet() + "font-size: 10px; padding: 2px 0;")
             if on_connect_request:
@@ -1832,6 +1848,11 @@ class StorageTile(QFrame):
         self._set_split(0, None, None)
         self._quota_token += 1  # any fetch still in flight is now stale
         self._checking = False
+        if not self.has_quota:
+            # Link-only provider (Proton): no number, no bar, no local-disk figure.
+            self.bar.setVisible(False)
+            self.detail_lbl.setText(self._reg.no_quota_text or "No quota available")
+            return
         if not exists:
             self.bar.setValue(0)
             self.detail_lbl.setText("not mounted")
@@ -2021,9 +2042,15 @@ class ICloudTile(QFrame):
         note.setObjectName("TileAccount")
         layout.addWidget(note)
 
-        open_btn = link_button("Open in Finder →")
+        if ICLOUD_DIR.exists():
+            open_btn = link_button("Open in Finder →")
+            open_btn.clicked.connect(lambda _=False, d=str(ICLOUD_DIR): run_cmd(["open", d]))
+        else:
+            url = cloud_quota.web_link("icloud")
+            open_btn = link_button("Open iCloud Drive provider page →")
+            open_btn.setToolTip(url)
+            open_btn.clicked.connect(lambda _=False, u=url: run_cmd(["open", u]))
         open_btn.setStyleSheet(open_btn.styleSheet() + "font-size: 10px; padding: 2px 0;")
-        open_btn.clicked.connect(lambda: run_cmd(["open", str(ICLOUD_DIR)]))
         layout.addWidget(open_btn)
 
         self.pct = None
@@ -2338,8 +2365,8 @@ class CloudAccountsDialog(QDialog):
             if not exists:
                 continue
             p = cloud_quota.provider_for_name(name)
-            if not p:
-                continue
+            if not p or not cloud_quota.PROVIDERS[p].has_quota:
+                continue  # link-only providers have nothing to connect
             _, account = split_tile_name(name)
             base = re.sub(r'\s+\(\d{2}-\d{2}-\d{4}.*\)$', '', account).strip()
             key = (p, base)
@@ -2412,6 +2439,8 @@ class AddAccountDialog(QDialog):
         self.provider_combo = QComboBox()
         for p in cloud_quota.quota_providers():
             self.provider_combo.addItem(p.label, p.key)
+        for p in cloud_quota.link_only_providers():
+            self.provider_combo.addItem(f"{p.label} (link only, no quota)", p.key)
         self.label_edit = QLineEdit()
         self.label_edit.setPlaceholderText("e.g. work.account@gmail.com")
         form.addRow("Provider:", self.provider_combo)
@@ -2445,6 +2474,10 @@ class AddAccountDialog(QDialog):
             self.status_lbl.setText("An account with that label already exists.")
             return
 
+        if not cloud_quota.PROVIDERS[provider].has_quota:
+            # Link-only provider (Proton): nothing to sign in to, just add the tile.
+            self._finished(True, None, key, provider, label)
+            return
         self.status_lbl.setText("Opening browser — sign in and approve access…")
         self.worker = ConnectWorker(provider, key)
         self.worker.done.connect(lambda ok, err: self._finished(ok, err, key, provider, label))
