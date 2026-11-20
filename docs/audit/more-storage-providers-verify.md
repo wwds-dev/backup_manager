@@ -206,3 +206,55 @@ New observations (none blocks):
 - Whether the three changed live files were written by the installed app or by a test cannot be proven separately; icloud_du.log is shown to be the app's (format). No live provider call, no real token used; no build, install or merge.
 - Windows/Linux behaviour of `os.fchmod`/umask (macOS only).
 - Every `raise_for_status` call site's URL contents.
+
+
+---
+
+## Third pass at f050c9d (2026-11-20)
+
+Scope: the follow-up that closes the second pass test gaps (G1 loopback bind, G2 handler timeout) and P3s S1 (non-ASCII state) and S6 (conftest isolation). **G1 PASS, G2 PASS (R1 residual), S1 PASS, S6 PASS (R2 residual), suite 507/0/0 1 skipped twice, live secrets files unchanged.**
+
+
+Playbook `docs/playbooks/qa-engineer.md`: last-reviewed 2026-10-14, status current (37 days; not stale). App calls no model (app-context `## Models used`: None), so the live-eval item does not apply.
+
+### Verdict: PASS for G1, G2 (with one residual), S1, S6 (with one residual), suite, live folder
+
+| Item | Result | Evidence |
+|---|---|---|
+| G1 listener binds 127.0.0.1 | PASS | `0.0.0.0` and `""` mutants KILLED by `test_listener_binds_loopback_only` (tests/test_oauth_hardening.py:356; source cloud_quota.py:286) |
+| G2 handler timeout | PASS, residual R1 | `None` KILLED, constant ignored (literal 5) KILLED, both by `test_silent_connection_is_closed_after_the_handler_timeout` (:368). `600` SURVIVED (see R1). Test: 10 runs, all pass, call time 0.83-0.92 s each, recv bounded by `settimeout(2)`; also passed in both full-suite runs. Not flaky, waits well under 2 s |
+| S1 non-ASCII state | PASS | Revert (compare str) KILLED by `test_non_ascii_state_is_rejected_cleanly[google]` and `[dropbox]`. Fix at cloud_quota.py:493 |
+| S6 conftest isolation | PASS, residual R2 | tests/conftest.py:9-15 autouse fixture patches SECRETS_DIR, CREDENTIALS_FILE, TOKENS_FILE, MANUAL_ACCOUNTS_FILE to tmp_path; later own-patching tests still win (monkeypatch order); full suite green with 5 test files that patch these themselves. Scratch test calling the real `save_app_credentials`, `save_tokens`, `save_manual_accounts`, `add_manual_account` with no patching: passed, files landed in tmp (0600), live-folder snapshot identical, no scratch marker in live JSON |
+| Full suite x2 | PASS | JUnit j3_1.xml and j3_2.xml: tests 507, failures 0, errors 0, skipped 1, both runs (exit 139 is the known Qt teardown). `git diff 2084ec2 HEAD -- tests` has no removed or changed lines, only additions |
+| Live folder | PASS | tokens.json (1785002817) and app_credentials.json (1782574518) mtimes unchanged; permissions diff empty. Five other files changed, see below |
+
+### Mutants (cloud_quota.py, each reverted by `git checkout -- cloud_quota.py`; `git status` clean at the end)
+Script `scratchpad/mut3.py`, output `scratchpad/mut3_out.txt`. Command: `QT_QPA_PLATFORM=offscreen PY -m pytest -q -p no:warnings tests/test_oauth_hardening.py`.
+
+| Mutant | Result | Failing tests |
+|---|---|---|
+| G1a bind 0.0.0.0 | KILLED | test_listener_binds_loopback_only |
+| G1b bind "" | KILLED | test_listener_binds_loopback_only |
+| G2a handler timeout None | KILLED | test_silent_connection_is_closed_after_the_handler_timeout |
+| G2b `_REDIRECT_REQUEST_TIMEOUT = 600` | SURVIVED | none (R1) |
+| G2c constant ignored, literal 5 | KILLED | test_silent_connection_is_closed_after_the_handler_timeout |
+| S1 revert, compare str not bytes | KILLED | test_non_ascii_state_is_rejected_cleanly[google], [dropbox] |
+| Regression: skip state compare Google | KILLED | test_connect_rejects_bad_or_missing_state[wrong-state-google], [-google], [False-google], plus non_ascii[google] (4) |
+| Regression: no folder chmod | KILLED | test_existing_loose_folder_and_file_are_tightened[credentials], [manual], [tokens] |
+| Regression: non-atomic write | KILLED | test_failed_replace_leaves_the_old_file[tokens], test_file_is_0600_before_it_takes_the_real_name[x3] (6 total) |
+| Regression: drop fchmod | SURVIVED, equivalent | mkstemp already creates 0600 (same as second pass P2-3a3) |
+
+### Residuals (ranked)
+1. R1, P3 (test gap): the G2 test sets the constant to 0.3 with monkeypatch, so a production value of 600 is overwritten and cannot be detected. Mutant `None` and a hard-coded literal are caught, a huge constant is not. Cheap fix: assert `cloud_quota._REDIRECT_REQUEST_TIMEOUT <= 10` in the test. The docstring comment at :369 claims it kills 600; that claim is wrong.
+2. R2, P3 (S6 scope): conftest isolates only the four cloud_quota paths. main.py derives `_STATE_FILE` (main.py:1200), `_QUOTA_HISTORY_FILE` (:1297), `_INSTANCE_LOCK_FILE` (:6036) and the icloud_du.log path (:924) from SECRETS_DIR at import time, so the fixture does not redirect them. Tests that touch them patch them individually (test_overdue_cooldown, test_resizable_columns, test_onedrive, test_drive_split, test_quota_*, test_tile_links), and I found no sign of test data in the live files, but nothing enforces it for a future test. These are not secrets files.
+
+### Live folder diff (`~/Library/Application Support/Backup Control Center`)
+Changed mtimes: gui.lock, env_last_use.json, state.json, icloud_du.log, quota_history.json. Cause: the installed app `/Applications/Backup Control Center.app` is running (pid 39711, started 19:35) and these are its own files (lock, history sampler, scan log, state). Evidence: quota_history last samples are 19:35 for the three real accounts, state.json has no test markers (webhook_url empty, log_scroll_pos 0, no "not a date"), no test account keys. I cannot rule out with certainty that a test run touched one of them while the app ran, but the content shows no test data. Nothing in the live folder was modified by me. Baselines: mtimes_before2.txt / mtimes_after2.txt, perms_before2.txt / perms_after2.txt.
+
+### S1 spot check
+Scratch tests (deleted, not committed), `_redirect_code` direct plus full `connect()` with fake browser/redirect/token endpoint: state values `é`, `☃☃`, empty, missing, 43 x "x" (equal length, wrong), 44 x "x", 43 emoji, all for google and dropbox: each returns `(False, "Sign-in response did not match this request (state check failed). Try again.")`, no exception, `requests.post` never called. Direct: correct state returns the code. Same message for all cases.
+
+### Not verified
+- OneDrive through `connect()` with a bad state: my scratch harness lacked a OneDrive client id (returned "No OneDrive Client ID saved yet."), so only the shared `_redirect_code` (cloud_quota.py:490, used at :318, :403, :531) was checked for it.
+- Branch coverage of the changed lines was not re-run this pass (the change is one expression plus a fixture; both branches of the line are hit by the tests above).
+- No live provider calls, no real tokens (none used).
