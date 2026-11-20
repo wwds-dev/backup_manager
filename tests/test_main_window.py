@@ -286,3 +286,34 @@ def test_icloud_gauge_shows_denied_text(win):
     win.overview.refresh_gauges()
     g = win.overview.gauges["icloud"]
     assert "No access" in g.detail_lbl.text() and g.value_lbl.text() == "—"
+
+
+# --- iCloud du: log the outcome, accept a partial total (spec icloud-unavailable) ---
+
+def _fake_du(monkeypatch, tmp_path, rc, out, err):
+    monkeypatch.setattr(main.cloud_quota, "SECRETS_DIR", tmp_path)
+    monkeypatch.setattr(main, "run_cmd", lambda args, timeout=60: (rc, out, err))
+
+
+def test_icloud_bytes_ok_and_logged(monkeypatch, tmp_path):
+    _fake_du(monkeypatch, tmp_path, 0, "10\t/x\n", "")
+    assert main.icloud_local_bytes() == 10 * 1024
+    assert "rc=0" in (tmp_path / "icloud_du.log").read_text()
+
+
+def test_icloud_bytes_partial_total_when_du_errors(monkeypatch, tmp_path):
+    _fake_du(monkeypatch, tmp_path, 1, "4\t/x/a\n20\t/x\n", "du: /x/b: Operation not permitted\n")
+    assert main.icloud_local_bytes() == 20 * 1024
+    log = (tmp_path / "icloud_du.log").read_text()
+    assert "rc=1" in log and "Operation not permitted" in log
+
+
+def test_icloud_bytes_none_when_du_prints_nothing(monkeypatch, tmp_path):
+    _fake_du(monkeypatch, tmp_path, 1, "", "du: x: Operation not permitted\n")
+    assert main.icloud_local_bytes() is None
+    assert "rc=1" in (tmp_path / "icloud_du.log").read_text()
+
+
+def test_icloud_log_failure_never_breaks_measuring(monkeypatch, tmp_path):
+    _fake_du(monkeypatch, tmp_path / "no" / "such", 0, "5\t/x\n", "")
+    assert main.icloud_local_bytes() == 5 * 1024

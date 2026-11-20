@@ -13,6 +13,7 @@ Run:  python main.py   (needs PySide6 — see requirements.txt)
 
 import sys
 import threading
+import time
 import ctypes
 import ctypes.util
 import fcntl
@@ -908,11 +909,24 @@ def cloud_services():
 
 
 def icloud_local_bytes() -> int | None:
-    """Bytes used by the local iCloud cache, or None if unavailable."""
-    rc, out, _ = run_cmd(["du", "-sk", str(HOME / "Library" / "Mobile Documents")], timeout=30)
-    if rc == 0 and out:
+    """Bytes used by the local iCloud cache, or None if unavailable.
+
+    `du` may exit 1 after printing a total when some subfolders are unreadable; that
+    partial total is used (it can understate). rc and the first error line go to
+    `icloud_du.log` (overwritten each run) so the cause of "Unavailable" is visible."""
+    started = time.monotonic()
+    rc, out, err = run_cmd(["du", "-sk", str(HOME / "Library" / "Mobile Documents")], timeout=30)
+    try:
+        (cloud_quota.SECRETS_DIR / "icloud_du.log").write_text(
+            f"{datetime.now().isoformat(timespec='seconds')} rc={rc} "
+            f"secs={time.monotonic() - started:.1f} out={out.strip()[-80:]!r} "
+            f"err={(err.strip().splitlines() or [''])[0][:200]!r}\n")
+    except OSError:
+        pass
+    lines = out.strip().splitlines()
+    if lines:
         try:
-            return int(out.split("\t", 1)[0]) * 1024
+            return int(lines[-1].split("\t", 1)[0]) * 1024
         except ValueError:
             pass
     return None

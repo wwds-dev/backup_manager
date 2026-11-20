@@ -36,3 +36,11 @@ secret, auth or input), Comply and Launch (public tier, no claim or data-flow ch
 - Known limit (reviewer P2): a stale last-known gauge value hides a denial that begins mid-session.
 - Not verified: the installed app really lacks Full Disk Access (only my shell was measured), and
   that the text fits the tile on screen.
+
+## Addendum 2026-11-20: v2.156 still showed "Unavailable"
+In the installed app the folder listing does not raise PermissionError, so `du` failed for
+another reason. Owner's yes ("Yes, add logging"): `icloud_local_bytes()` now writes `rc`,
+seconds, the tail of stdout and the first stderr line to `icloud_du.log` in the app-data
+folder (overwritten each run; a write failure is ignored), and uses the last `du` line as a
+partial total when `du` exits non-zero but printed one (it can understate the real size).
+Tests: 4 in `tests/test_main_window.py`; 4 mutations caught.
