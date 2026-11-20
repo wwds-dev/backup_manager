@@ -61,3 +61,17 @@ P0: 0 · P1: 0 · P2: 2 · P3: 5. No blocking defect. Owner should fix or explic
 - `tests/test_thread_lifetime.py` passed but was not read.
 - Non-JSON bodies in `_oauth_error_text`; a 200 with non-JSON would raise `ValueError` in `onedrive_connect` (no secrets in text).
 - Entra loopback-port and Microsoft scope facts are marked "memory" in the spec; not re-checked against vendor docs.
+
+## Re-check of the fix commits (2026-11-20)
+
+Diff `4965f9d..914774f` on `claude/wizardly-payne-caa30e` read; one mutation per fix re-planted in a scratch detached worktree at 914774f (removed afterwards). Result: P2-1, P2-2 and P3-1 are closed; no new P0/P1/P2.
+
+| Fix | Change | Mutation re-planted | Result |
+|---|---|---|---|
+| P2-1 (2117864) | `_store_refresh_token` returns if the account is gone; `disconnect` takes `_refresh_lock` before `_TOKENS_LOCK` (same order as a refresh, no deadlock) | restored the old write-back | `test_store_refresh_token_never_recreates_a_removed_account` fails |
+| P2-2 (ea347ef) | absent `total` stays None ("unlimited plan"); 0, negative or unparseable gives 0 ("total not reported") | restored `int(total) or None` | `test_quota_zero_or_unusable_total_is_not_unlimited[0_0]`, `[0_1]`, `[-5]` fail |
+| P3-1 (914774f) | tooltip reads "within Photos, Gmail and other" | text changed to "within Photos." | `test_photos_never_alone` fails |
+
+The three test files (`test_onedrive`, `test_drive_split`, `test_tile_links`) passed unmutated at 914774f.
+
+Not verified: the full suite on the fixes (the build session reports 464 passed, 1 skipped); the mid-refresh disconnect race itself (`test_disconnect_during_refresh_stays_disconnected` was not run or read, and the planted mutation does not cover the new lock in `disconnect`); the remaining P3 items (P3-2 to P3-5), unchanged and left for Secure.
