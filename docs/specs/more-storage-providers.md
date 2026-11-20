@@ -69,7 +69,11 @@ Each tile gets one link, from the provider registry, never typed by the user:
 - Fixed `https://` URLs in the registry (re-check at Architect): Google Drive `drive.google.com`,
   Dropbox `dropbox.com/home`, OneDrive `onedrive.live.com`, Box `app.box.com`, pCloud `my.pcloud.com`,
   Proton `drive.proton.me`, iCloud `icloud.com/iclouddrive`.
-- A provider page cannot pick the account: the label says "provider page", not the account. Opening goes
+- **Owner decision 2026-11-20: Proton tile yes, quick-access links yes, one link on every tile even with
+  several accounts of one provider.** Each account has its own tile and so its own link. For Google the
+  link is `https://drive.google.com/?authuser=<account email>` when the tile's account is an email (opens
+  that account's Drive; re-check at Architect); other providers cannot pick an account from a URL, so
+  their link opens the provider page and the label says "provider page", not the account. Opening goes
   through the existing `run_cmd(["open", url])`; the URL comes only from the registry, never from an API
   response. Applies to tiles without quota too (Proton, iCloud).
 
@@ -139,8 +143,8 @@ skipped: detail text only. Launch skipped (public tier, optional).
 2. Wording for the split: "Drive files" and "Photos, Gmail and other"?
 3. May one agent read your Google `storageQuota` once (your token) to check the formula?
 4. Gauges: add one only when that provider has an account (proposed)?
-5. Proton: add the link-only tile with no quota (1c)?
-6. Quick-access links on every tile as in 1d?
+5. Proton link-only tile (1c): **yes** (owner, 2026-11-20).
+6. Quick-access links on every tile (1d): **yes**, per tile for several accounts (owner, 2026-11-20).
 
 ## Architect (2026-11-20; GATE: network, secrets, state)
 
@@ -179,8 +183,8 @@ Read first: `cloud_quota.py`, `StorageTile` (`main.py:1633-1900`), `StorageCard.
    fetches therefore cannot interleave a read of `tokens.json` with another's write.
 7. **Link-only tiles (Proton) and links:** `StorageTile` takes `has_quota` from the registry; when False it
    never calls `set_usage` network or disk paths: fixed text "No quota available (Proton has no public API)",
-   bar hidden, `pct` stays None, and `refresh_gauges` skips it. One link button per tile from
-   `registry.web_url` when not mounted; "Open in Finder" when mounted (unchanged).
+   bar hidden, `pct` stays None, and `refresh_gauges` skips it. One link button per tile (each account its own) from
+   `registry.web_url` (Google: with `authuser=<email>`, email URL-encoded) when not mounted; "Open in Finder" when mounted (unchanged).
 8. **Gauges:** the four fixed slots stay; OneDrive adds a fifth only when a OneDrive tile exists. `Gauge`
    grouping already keys by `tile.provider`; the grid builds the extra column on `refresh_gauges` first run
    and on account add. Proton never gets a gauge.
