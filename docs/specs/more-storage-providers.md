@@ -53,8 +53,8 @@ docs, and re-check that all of them accept the app's loopback redirect.
 ### 1c. Proton Drive without quota
 
 Finding: no public quota API (tried, does not work), so no number can be read. Proposal: add a
-**link-only tile**, titled "Proton Drive" with the fixed text "No quota available (Proton has no public
-API)", **no bar, no percentage, no gauge slot, and no local-disk number** (the old reason these were
+**link-only tile**, titled "Proton Drive" with the fixed text "No quota available (no quota API this app
+can use)", **no bar, no percentage, no gauge slot, and no local-disk number** (the old reason these were
 left out was the tile repeating the Local Disk figure; this one shows none). It carries the access links
 below, so it is worth its row only as a shortcut. Shown only when a `ProtonDrive-*` mount exists, or the
 owner adds it by hand. Recommendation: **add it**, small, cost one registry entry plus a tile variant;
