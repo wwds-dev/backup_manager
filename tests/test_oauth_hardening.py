@@ -122,3 +122,104 @@ def test_connect_uses_pkce_s256_and_sends_the_verifier(monkeypatch, provider):
     verifier = seen["posts"][0][1]["code_verifier"]
     assert len(verifier) >= 43
     assert q["code_challenge"] == [_s256(verifier)]
+
+
+# ---------------------------------------------------------------------------- P2-2 / P3-2 listener
+import socket  # noqa: E402
+import threading  # noqa: E402
+import time  # noqa: E402
+
+
+def _free_port():
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def _start_wait(port, timeout):
+    """Run _wait_for_redirect in a thread; return (thread, box) once the port accepts."""
+    box = {}
+
+    def run():
+        box["result"] = cloud_quota._wait_for_redirect(port, timeout=timeout)
+        box["at"] = time.monotonic()
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            socket.create_connection(("127.0.0.1", port), timeout=0.2).close()
+            break
+        except OSError:
+            time.sleep(0.02)
+    return t, box
+
+
+def _get(port, path):
+    with socket.create_connection(("127.0.0.1", port), timeout=3) as s:
+        s.sendall(f"GET {path} HTTP/1.0\r\nHost: localhost\r\n\r\n".encode())
+        return s.recv(4096)
+
+
+def test_stalled_connection_does_not_block_the_real_redirect():
+    port = _free_port()
+    t, box = _start_wait(port, timeout=10)
+    stalled = socket.create_connection(("127.0.0.1", port))  # connects, sends nothing
+    try:
+        reply = _get(port, "/?code=c1&state=s1")
+        assert b"200" in reply.split(b"\r\n")[0]
+        t.join(5)
+        assert not t.is_alive(), "wait did not return while a stalled connection was open"
+        assert box["result"]["code"] == ["c1"]
+    finally:
+        stalled.close()
+
+
+def test_stalled_connection_does_not_hold_the_wait_past_its_timeout():
+    port = _free_port()
+    t, box = _start_wait(port, timeout=1)
+    stalled = socket.create_connection(("127.0.0.1", port))
+    try:
+        t0 = time.monotonic()
+        t.join(6)
+        assert not t.is_alive(), "wait hung on the stalled connection"
+        assert box["at"] - t0 < 4
+        assert box["result"] == {}
+    finally:
+        stalled.close()
+
+
+def test_port_is_free_again_after_a_stalled_wait():
+    port = _free_port()
+    t, _ = _start_wait(port, timeout=0.5)
+    stalled = socket.create_connection(("127.0.0.1", port))
+    try:
+        t.join(6)
+        assert not t.is_alive()
+        t2, box2 = _start_wait(port, timeout=5)  # a second connect can rebind
+        _get(port, "/?code=c2&state=s2")
+        t2.join(5)
+        assert box2["result"]["code"] == ["c2"]
+    finally:
+        stalled.close()
+
+
+@pytest.mark.parametrize("stray", ["/favicon.ico", "/", "/?foo=bar"])
+def test_request_without_code_or_error_is_ignored(stray):
+    port = _free_port()
+    t, box = _start_wait(port, timeout=10)
+    _get(port, stray)
+    time.sleep(0.2)
+    assert t.is_alive(), "a stray request ended the wait"
+    _get(port, "/?code=c3&state=s3")
+    t.join(5)
+    assert box["result"]["code"] == ["c3"] and box["result"]["state"] == ["s3"]
+
+
+def test_error_redirect_ends_the_wait():
+    port = _free_port()
+    t, box = _start_wait(port, timeout=10)
+    _get(port, "/?error=access_denied&state=s4")
+    t.join(5)
+    assert not t.is_alive()
+    assert box["result"]["error"] == ["access_denied"]

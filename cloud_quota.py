@@ -219,8 +219,16 @@ def disconnect(account_key):
 # again before it timed out) its server is still bound to the port — so before
 # starting a new one we explicitly close out whatever's currently tracked here.
 # ----------------------------------------------------------------------------
-class _ReusableHTTPServer(http.server.HTTPServer):
+class _ReusableHTTPServer(http.server.ThreadingHTTPServer):
+    """One thread per request, so a connection that never sends a request cannot hold up the
+    real redirect or `shutdown()`. Request threads are daemons and never joined on close."""
     allow_reuse_address = True
+    daemon_threads = True
+    block_on_close = False
+
+
+# Seconds a redirect connection may sit idle before its handler gives up (socket timeout).
+_REDIRECT_REQUEST_TIMEOUT = 5
 
 
 _active_server_lock = threading.Lock()
@@ -245,11 +253,22 @@ def _wait_for_redirect(port, timeout=180):
 
     result = {}
     done = threading.Event()
+    claim = threading.Lock()
 
     class Handler(http.server.BaseHTTPRequestHandler):
+        timeout = _REDIRECT_REQUEST_TIMEOUT
+
         def do_GET(self):
-            qs = urllib.parse.urlparse(self.path).query
-            result.update(urllib.parse.parse_qs(qs))
+            query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            # Only a sign-in response ends the wait; a stray request (favicon, a probe)
+            # is answered 404 and the listener keeps waiting. The first response wins.
+            if "code" not in query and "error" not in query:
+                self.send_error(404)
+                return
+            with claim:
+                first = not done.is_set()
+                if first:
+                    result.update(query)
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.end_headers()
@@ -257,7 +276,8 @@ def _wait_for_redirect(port, timeout=180):
                 b"<html><body>Connected. You can close this tab and "
                 b"return to Backup Control Center.</body></html>"
             )
-            done.set()
+            if first:
+                done.set()
 
         def log_message(self, *args):
             pass
