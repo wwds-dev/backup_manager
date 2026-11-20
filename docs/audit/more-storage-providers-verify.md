@@ -335,3 +335,58 @@ Real-HOME behaviour (deliberately never run); live GUI; the 2 skipped tests; whe
 1. P3: test_secrets_isolation.py does not assert CREDENTIALS_FILE, TOKENS_FILE, MANUAL_ACCOUNTS_FILE (3 conftest mutants survive).
 2. P3: WORKSPACE_REPORT and _SHOW_REQUEST_FILE are not redirected (latent leak for a future test).
 3. P4: skip count depends on checkout location (2 here, 1 beside lab tree).
+
+
+---
+
+## Fifth pass at fa9cbb2 (2026-11-20)
+
+Scope: the two P3s of the fourth pass (credentials/tokens/manual-accounts redirects; workspace_report and show_request redirects). Fake HOME for every run. **PASS.** All five new redirects killed when removed (both layers or per-test layer); earlier four redirects no regression; suite 510/0/0, 2 skipped (checkout outside the lab tree), three runs; fake home empty after runs; real folder permission bits unchanged, only `state.json` changed (102 to 154 B at 21:05:42, most likely the running installed app; not attributable with certainty). Residual P3s: baseline-layer-only removal survives for all paths; the `_SHOW_REQUEST_FILE` test writes via `write_text` rather than the production writer (main.py:6136); `AUTOSYNC_STATE_DIR` (main.py:4956) is read-only and unredirected.
+
+
+Playbook qa-engineer: status current, last-reviewed 2026-10-14 (not stale). No model is called (app-context Models used: None), so the model checks do not apply.
+
+### Verdict: PASS (one P3 note)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Five new redirects (CREDENTIALS_FILE, TOKENS_FILE, MANUAL_ACCOUNTS_FILE, WORKSPACE_REPORT, _SHOW_REQUEST_FILE) | PASS | each removed from both layers and from the per-test layer alone: KILLED by test_every_secrets_and_state_writer_lands_in_the_test_folder |
+| Earlier four (SECRETS_DIR, _STATE_FILE, _QUOTA_HISTORY_FILE, _INSTANCE_LOCK_FILE) | PASS, no regression | all KILLED (SECRETS_DIR by both tests; the other three by test_real_writers_land_in_the_test_folder) |
+| Full suite x3 (m1, m2, m3; m4 extra) | PASS | JUnit: 510 tests / 0 failures / 0 errors / 2 skipped each time; exit 139/134 = known Qt teardown crash |
+| Assertions removed or weakened | PASS | only removed line in tests/ is a docstring line in conftest.py:3 (reworded); test_secrets_isolation.py is addition-only |
+| Fake-home leak | PASS | `find fakehome -mindepth 1` empty after a clean full-suite run (m3, and again after m4) |
+| Real folder | PASS with note | mtimes: only state.json differs (102 B -> 154 B, mtime 21:05:42). Permission bits unchanged (all files 0600/0644, dirs 0700/0755 as before; perms_before4 listed only a subset, new paths in the after list existed before per the 21-file mtime baseline). |
+
+### Mutants (HOME=fakehome, test_secrets_isolation.py only)
+Layers: both = line removed from _redirect; pertest = per-test fixture restores the original value; baseline = session fixture restores the original (live) value.
+
+| Redirect | both | pertest only | baseline only |
+|---|---|---|---|
+| CREDENTIALS_FILE | KILLED (new test) | KILLED (new test) | SURVIVED |
+| TOKENS_FILE | KILLED (new test) | KILLED (new test) | SURVIVED |
+| MANUAL_ACCOUNTS_FILE | KILLED (new test) | KILLED (new test) | SURVIVED |
+| WORKSPACE_REPORT | KILLED (new test) | KILLED (new test) | SURVIVED |
+| _SHOW_REQUEST_FILE | KILLED (new test) | KILLED (new test) | SURVIVED |
+| SECRETS_DIR | KILLED (both tests) | KILLED (both) | SURVIVED |
+| _STATE_FILE | KILLED (real_writers) | KILLED | SURVIVED |
+| _QUOTA_HISTORY_FILE | KILLED (real_writers) | KILLED | SURVIVED |
+| _INSTANCE_LOCK_FILE | KILLED (real_writers) | KILLED | SURVIVED |
+
+Baseline-only survivors are expected: the per-test layer still redirects while a test runs, and the baseline exists only for threads that outlive their test, which no test here exercises. Same for the earlier four. P3, unchanged from before; killing it needs a test that undoes the per-test patch and asserts the fallback is scratch.
+`git checkout -- tests` after every mutant; `git status --short` empty at the end.
+
+### Real-writer calls (tests/test_secrets_isolation.py)
+- cloud_quota.save_app_credentials / save_tokens / save_manual_accounts: production functions. workspace_extra.write_report(…, main.WORKSPACE_REPORT): production function (workspace_extra.py:295), the same call main.py:3728 makes.
+- _SHOW_REQUEST_FILE: the test calls `main._SHOW_REQUEST_FILE.write_text("now")` directly, not the production writer (main.py:6136 inside a method). It proves the path is redirected, not that the production code writes it; adequate for the isolation goal (P3 note).
+- Asserts: p.exists() and tmp_path in p.resolve().parents. There is no explicit assert that the file is absent from the live location; a removed redirect makes the write land at the fake home, which fails the parents check, and the fake home is the only place it could go. Acceptable.
+
+### Remaining module-level paths not redirected
+- main.py:4956 AUTOSYNC_STATE_DIR = HOME/Library/Application Support/git_autosync, used as a default arg of autosync_state (main.py:4993), a read path; not in the Backup Control Center folder.
+- main.py:123 HOME, main.py:43 _script: read-only.
+- lab_health.py:291 LAUNCHD_DIRS, :522 HISTORY_FILES: read paths from Path.home().
+- Everything else built from SECRETS_DIR is computed at call time (lab_health.py:46, 637, 827, 1119; main.py:924, 1213, 1324, 5703-5705, 6059, 6135) and follows the redirect. No further writers found.
+
+### Not verified
+- Baseline-only layer behaviour (no test).
+- That the production show-request writer (main.py:6136) writes to the redirected path (only the path is tested).
+- state.json change in the real folder: the installed app (pid 66494) is running and state.json holds app keys (column_widths, log_scroll_pos, last_workspace_scan). Its mtime fell near the end of run m3, but the fake home stayed empty after m3 and m4, and m4 left the real mtime untouched, so a test leak is not indicated; cannot rule out the coincidence absolutely. Other mtime-baseline files unchanged.
