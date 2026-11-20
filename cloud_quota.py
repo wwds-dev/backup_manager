@@ -556,7 +556,14 @@ def onedrive_quota(account_key):
     resp.raise_for_status()
     q = resp.json().get("quota") or {}
     used = int(q.get("used", 0))
-    total = int(q["total"]) if q.get("total") else None
+    # Only an absent key means "no limit" (None). A total of 0, or one that is not a
+    # positive number, is "not reported" (0): never shown as an unlimited plan.
+    total = None
+    if "total" in q:
+        try:
+            total = max(int(q["total"]), 0)
+        except (TypeError, ValueError, OverflowError):
+            total = 0
     return Quota(used, total)
 
 

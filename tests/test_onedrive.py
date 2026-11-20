@@ -303,6 +303,13 @@ def test_quota_without_total(monkeypatch):
     assert cloud_quota.quota(KEY) == (10, None)
 
 
+@pytest.mark.parametrize("raw", [0, "0", None, "abc", -5])
+def test_quota_zero_or_unusable_total_is_not_unlimited(monkeypatch, raw):
+    """Review P2-2: only an absent key means no limit; 0 or junk is 'not reported' (0)."""
+    _quota(monkeypatch, 200, {"quota": {"used": 10, "total": raw}})
+    assert cloud_quota.quota(KEY) == (10, 0)
+
+
 def test_quota_401_raises_with_status(monkeypatch):
     _quota(monkeypatch, 401, {"error": {"code": "InvalidAuthenticationToken"}})
     with pytest.raises(requests.HTTPError, match="401"):
@@ -331,6 +338,23 @@ def test_tile_renders_used_of_total(qapp, monkeypatch, tmp_path):
     assert tile.provider == "onedrive"
     assert "used of" in tile.detail_lbl.text() and "account quota" in tile.detail_lbl.text()
     assert tile.pct == 25
+
+
+def test_tile_total_zero_says_not_reported(qapp, monkeypatch, tmp_path):
+    monkeypatch.setattr(main.cloud_quota, "is_connected", lambda k: True)
+    monkeypatch.setattr(main.cloud_quota, "quota", lambda k: cloud_quota.Quota(5 * 10**9, 0))
+    tile = _settle(main.StorageTile(KEY, tmp_path, True))
+    text = tile.detail_lbl.text()
+    assert "total not reported" in text
+    assert "unlimited" not in text
+    assert tile.pct is None and tile.bar.value() == 0
+
+
+def test_tile_total_absent_still_unlimited(qapp, monkeypatch, tmp_path):
+    monkeypatch.setattr(main.cloud_quota, "is_connected", lambda k: True)
+    monkeypatch.setattr(main.cloud_quota, "quota", lambda k: cloud_quota.Quota(5 * 10**9, None))
+    tile = _settle(main.StorageTile(KEY, tmp_path, True))
+    assert "unlimited plan" in tile.detail_lbl.text()
 
 
 def test_tile_failed_call_never_shows_local_disk(qapp, monkeypatch, tmp_path):

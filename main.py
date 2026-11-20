@@ -1976,9 +1976,12 @@ class StorageTile(QFrame):
                 )
                 _append_quota_sample(self.account_key, used, total, drive=drive, trash=trash)
                 self._refresh_sparkline()
-            else:
+            elif total is None:  # the provider omits the limit: unlimited plan
                 self.bar.setValue(0)
                 self.detail_lbl.setText(f"{human_size(used)} used  (unlimited plan)")
+            else:  # 0 or unusable: the provider gave no usable total, claim nothing
+                self.bar.setValue(0)
+                self.detail_lbl.setText(f"{human_size(used)} used  (total not reported)")
             return
         self._set_split(0, None, None)
         # Token likely expired or revoked
