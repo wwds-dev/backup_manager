@@ -1801,6 +1801,7 @@ class StorageTile(QFrame):
             self.reconnect_btn.clicked.connect(lambda: self._do_reconnect(on_connect_request))
         self.reconnect_btn.setVisible(False)
         layout.addWidget(self.reconnect_btn)
+        layout.addStretch(1)  # tiles share one height; spare room goes below, not between lines
 
         self.pct = None  # % used once known; the Overview gauges read it
         self.set_usage(path, exists)
@@ -2080,6 +2081,7 @@ class ICloudTile(QFrame):
             open_btn.clicked.connect(lambda _=False, u=url: run_cmd(["open", u]))
         open_btn.setStyleSheet(open_btn.styleSheet() + "font-size: 10px; padding: 2px 0;")
         layout.addWidget(open_btn)
+        layout.addStretch(1)  # tiles share one height; spare room goes below, not between lines
 
         self.pct = None
         self._worker = self._Worker()
@@ -2166,22 +2168,36 @@ class FlowLayout(QLayout):
         m = self.contentsMargins()
         return size + QSize(m.left() + m.right(), m.top() + m.bottom())
 
+    def _cell_size(self):
+        """One size for every item: the widest hint, and the tallest height any item
+        needs *at that width*. A tile's wrapped labels only report their real height
+        for a given width (sizeHint alone is too short and clips the text), and a
+        tile with fewer lines must not come out shorter than its neighbours."""
+        width = max((i.sizeHint().width() for i in self._items), default=0)
+        height = 0
+        for item in self._items:
+            h = item.sizeHint().height()
+            if item.hasHeightForWidth():
+                h = max(h, item.heightForWidth(width))
+            height = max(height, h, item.minimumSize().height())
+        return QSize(width, height)
+
     def _layout(self, rect, test_only):
         m = self.contentsMargins()
         eff = rect.adjusted(m.left(), m.top(), -m.right(), -m.bottom())
+        cell = self._cell_size()
         x, y, row_height = eff.x(), eff.y(), 0
         for item in self._items:
-            hint = item.sizeHint()
-            next_x = x + hint.width() + self._spacing
+            next_x = x + cell.width() + self._spacing
             if next_x - self._spacing > eff.right() and row_height > 0:
                 x = eff.x()
                 y = y + row_height + self._spacing
-                next_x = x + hint.width() + self._spacing
+                next_x = x + cell.width() + self._spacing
                 row_height = 0
             if not test_only:
-                item.setGeometry(QRect(QPoint(x, y), hint))
+                item.setGeometry(QRect(QPoint(x, y), cell))
             x = next_x
-            row_height = max(row_height, hint.height())
+            row_height = max(row_height, cell.height())
         return y + row_height - rect.y() + m.bottom()
 
 

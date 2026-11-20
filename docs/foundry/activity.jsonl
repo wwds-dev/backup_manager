@@ -110,3 +110,5 @@
 {"ts": "2026-11-20T15:04:35", "phase": "review", "state": "start", "spec": "more-storage-providers"}
 {"ts": "2026-11-20T15:07:59", "phase": "review", "state": "done", "spec": "more-storage-providers"}
 {"ts": "2026-11-20T22:52:05", "phase": "release", "state": "done", "spec": "more-storage-providers"}
+{"ts": "2026-11-20T23:47:18", "phase": "build", "state": "start", "spec": "tile-uniform-size"}
+{"ts": "2026-11-20T23:50:53", "phase": "build", "state": "done", "spec": "tile-uniform-size"}
