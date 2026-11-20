@@ -322,3 +322,62 @@ Coverage of changed lines: not measured (no coverage tool configured); the mutat
 3. Process: this file lives on branch `claude/charming-pare-c71b74`; it was copied into this worktree to append this section.
 
 Overall: PASS for G1, G2, S1, S6; no P0/P1/P2 open.
+
+## Fourth pass at e6ef87c (Verify, QA engineer)
+
+Playbook `docs/playbooks/qa-engineer.md`: `status: current`, `last-reviewed: 2026-10-14` (37 days old, not stale).
+Method: detached scratch copy (`git archive HEAD`) of the tree; every run used a fresh scratch `HOME` containing
+`Library/Application Support/Backup Control Center` (the "scratch live folder"), except the one real-HOME run at the end.
+Worktree untouched except this file (`git status --short` showed only this file modified). Mutations restored in the scratch copy
+(`diff -r` of tests/ and cloud_quota.py against the worktree: RESTORED).
+
+### Verdicts
+- **R1 (production handler timeout unpinned): CLOSED.** `test_production_handler_timeout_is_short` asserts
+  `0 < cloud_quota._REDIRECT_REQUEST_TIMEOUT <= 10` and fails for both 600 and 0 (table).
+- **R2 (tests wrote main.py import-time paths): CLOSED.** The session baseline is what actually keeps files out of the
+  live folder; `test_secrets_isolation` is what guards the per-test layer and the main.* patches (table).
+
+### Mutation table (scratch copy, `HOME` = scratch)
+| # | Mutation | Result |
+|---|---|---|
+| M1 | `_REDIRECT_REQUEST_TIMEOUT = 600` (cloud_quota.py:232) | KILLED: `test_production_handler_timeout_is_short` fails (test_oauth_hardening.py:397) |
+| M2 | `_REDIRECT_REQUEST_TIMEOUT = 0` | KILLED: `test_production_handler_timeout_is_short` and `test_first_sign_in_response_wins_over_a_later_one` fail |
+| M3 | remove the session-baseline fixture, keep per-test | Suite stays 509/0 failures, but the scratch live folder was left with `state.json` (25 bytes, `{"column_widths": {}}`): some test's worker thread or an undone per-test patch writes through the unredirected path. Session layer is NECESSARY. The writing test was not identified (not verified) |
+| M4 | remove the three `main.*` patches (both layers) | KILLED: `test_real_writers_land_in_the_test_folder` fails (test_secrets_isolation.py:15, path outside test folder). Full run also leaked `state.json` and `quota_history.json` into the scratch live folder, which shows the patches are needed |
+| M5 | remove the per-test layer only (session kept) | KILLED: only `test_real_writers_land_in_the_test_folder` fails (path is `secrets_baseline0/state.json`, outside tmp_path); full run leaves the scratch live folder empty. So the per-test layer is guarded only by that one test, and nothing else notices if it goes |
+Baseline (unmutated) full run with scratch `HOME`: scratch live folder empty after the run (0 files), in all four full runs below.
+
+### Test quality
+- `test_production_handler_timeout_is_short`: can fail (M1, M2); pins the shipped value, not the patched one. It is a constant check, not
+  behaviour (the handler's use of it is covered by `test_silent_connection...`); the bound 10 s is a judgement call, acceptable. No time or network use.
+- `test_secrets_isolation.py`: real writers, not mocked except `run_cmd`; assertions can fail (M4, M5) and check `.exists()` as well as location.
+  Minor: it does not assert `cloud_quota.TOKENS_FILE` etc., but conftest patches them identically and the existing oauth tests exercise them.
+- Override: autouse fixtures run before the explicitly requested `isolated` fixture (test_oauth_hardening.py:24) and test-body patches, so tests that patch
+  `SECRETS_DIR` / `_STATE_FILE` (test_overdue_cooldown.py:22, test_resizable_columns.py:30, others) override correctly; 509/0 failures confirms it.
+  Caveat: tests that patch only `cloud_quota.SECRETS_DIR` (e.g. test_main_window.py:37, test_drive_split.py:109) leave `CREDENTIALS_FILE`, `TOKENS_FILE`,
+  `MANUAL_ACCOUNTS_FILE` on conftest's `tmp_path/_secrets`, which is still a scratch folder, so safe (and better than before, when they fell back to the live files).
+- Order dependence: test_oauth_hardening + test_secrets_isolation x5: 45 tests, 0 failures each time (exit 0). Full suite with files in reversed order and in a seeded
+  random order (seed 7, explicit file lists; pytest-randomly absent): 509/0 failures each. Within-file order not shuffled (not verified).
+- `import main` in conftest: 23 test files already import main at module level, so collection cost and import side effects are unchanged in kind. `main.py`
+  creates no `QApplication` at import (a test creates it), and `QT_QPA_PLATFORM` is only read at app creation, so the `setdefault("offscreen")` lines in test modules
+  still run in time. A run without `QT_QPA_PLATFORM` set in the shell was not tried (not verified). The only residual risk is that an import-time failure in main.py now fails every test at conftest load instead of the 23 files that use it (P3, informational).
+
+### Full suite (`QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest -q -p no:warnings --junitxml=...`, scratch tree at e6ef87c)
+| Run | HOME | tests | failures | errors | skipped | exit | files left in scratch live folder |
+|---|---|---|---|---|---|---|---|
+| 1 | scratch | 509 | 0 | 0 | 2 | 139 (known Qt teardown crash) | 0 |
+| 2 | scratch | 509 | 0 | 0 | 2 | 139 | 0 |
+| 3 | scratch, files reversed | 509 | 0 | 0 | 2 | 139 | 0 |
+| 4 | scratch, files shuffled (seed 7) | 509 | 0 | 0 | 2 | 139 | 0 |
+| 5 | real (after the scratch runs showed the fixture holds) | 509 | 0 | 0 | 1 | 139 | n/a, see below |
+The skip count is 1 in the real-HOME run and 2 in the scratch runs; which skip is HOME-dependent was not investigated (not verified).
+Live folder: `ls -l` of the real Application Support folder before and after run 5 is identical. This is NOT evidence on its own: the installed app (pid 66494) rewrites its
+live files on its own timer, so live mtimes can move or stay for reasons unrelated to the tests. The evidence is the empty scratch live folders in runs 1 to 4 and M3 to M5.
+Coverage of changed lines: not measured (no coverage tool configured); the mutation kills are the evidence. Model-calling checks: not applicable (no model in `## Models used` for this change).
+
+### Ranked gaps
+1. P3: the per-test layer is guarded by a single test (M5); acceptable since the session layer already holds the live folder.
+2. P3: the test that writes `state.json` when the session layer is absent is unidentified.
+3. P3: a conftest-level `import main` makes an import failure in main.py fail the entire suite (informational).
+
+Overall: R1 and R2 PASS; no P0/P1/P2 open.
