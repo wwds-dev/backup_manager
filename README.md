@@ -133,8 +133,8 @@ run:
    organizational directory and personal Microsoft accounts".
 3. Add a platform: **Mobile and desktop applications** (a *public client*, meaning an app
    that cannot keep a secret), with the redirect `http://localhost`. The app sends
-   `http://localhost:53789/`; Microsoft is expected to ignore the port on a registered
-   `http://localhost` (unverified).
+   `http://localhost:53789/`; Microsoft ignores the port on a registered `http://localhost`
+   (Microsoft's Entra redirect-URI page, read 2026-11-20).
 4. Under **API permissions** add Microsoft Graph, **Delegated**, `Files.Read` and
    `offline_access`. A work or school account may need an administrator to consent.
 5. Copy the **Application (client) ID**. There is no client secret.
@@ -143,7 +143,7 @@ run:
    OneDrive for an unmounted one) and approve access in the browser.
 
 `Files.Read` is wider than the read-only scope Google uses (it lets the app read file
-contents, though the app only asks Microsoft for the quota figure; per the design notes, not re-checked against Microsoft's documentation). OneDrive's "used"
+contents, though the app only asks Microsoft for the quota figure; Microsoft's Graph "Get drive" page, read 2026-11-20, lists `Files.Read` as the least-privileged permission for `/me/drive`, so no narrower one exists). OneDrive's "used"
 number is what OneDrive reports, which can include system-used space, not a sum of your files.
 
 ---
@@ -462,8 +462,8 @@ MIRROR=1 ~/Documents/lab/_Admin/backup/backup_to_gdrive.sh             # apply
 ## What it deliberately does NOT do
 - Does not reconfigure the proprietary sync engines of iCloud, Google Drive, Dropbox,
   or Proton Drive — those stay in their own apps.
-- **iCloud Drive and Proton Drive will never show real cloud quota.** No public API
-  exists. The iCloud tile shows local cache size only via `du`; the Proton tile shows
+- **iCloud Drive and Proton Drive will never show real cloud quota.** No quota API this app
+  can use exists. The iCloud tile shows local cache size only via `du`; the Proton tile shows
   no number at all, only its link.
 - **Sleep mode suspends everything.** No timer, app, or background process runs while
   the Mac is asleep. Enable **⏰ Wake Mac** so the Mac wakes itself before the scheduled time.
@@ -773,6 +773,33 @@ exactly the moment someone is asking.
 This is the lab-wide scheme, shared with `imprint`, `sonar` and `lab_hub`, and
 the Lab Project Monitor computes the same string from the same two inputs, so
 the dashboard and the running app cannot disagree.
+
+## Privacy
+Backup Control Center runs on your Mac. It has no server, no account with us, no analytics and no crash
+reporting, and the author receives no data from it. It talks to the services you connect: Google,
+Dropbox and Microsoft OneDrive (to read your storage quota, using an OAuth client or app registration
+that you create yourself) and, if you set one, a webhook URL (it receives the fixed text "backup
+finished WITH ERRORS"; no file names). For OneDrive the app asks Microsoft for the permission
+`Files.Read`, which technically allows reading your OneDrive files, but it requests only your storage
+quota and stores only sizes. The links on each tile open the provider's own website. On your Mac it
+stores, in `~/Library/Application Support/Backup Control Center/`, your OAuth client details,
+per-account refresh tokens (plain JSON files readable only by your user, mode 0600; not the macOS
+Keychain), quota history, settings and records of the cleanups you ran. Removing an account in the app
+deletes only the local token; to revoke access go to the provider (Microsoft:
+<https://account.live.com/consent/Manage>, or <https://myapps.microsoft.com> for work or school
+accounts). Delete the folder to remove everything the app stores. This describes what the code does at
+the version in the window title, by design and per the code at this version; it has **not yet been
+measured with a network trace**, so treat "nothing else is sent" as the design, not a measured fact. It is
+not a legal document.
+
+## Not affiliated
+Backup Control Center is an independent project. It is not affiliated with, endorsed by or sponsored by
+Google LLC, Dropbox, Inc., Microsoft Corporation, Proton AG, Apple Inc. or The Qt Company. Google Drive,
+Google Photos, Gmail, Dropbox, Microsoft, OneDrive, Entra, Proton Drive, iCloud, Time Machine and macOS
+are names or trademarks of their respective owners, used here only to say which service or product the
+app talks to or reads about. No logos of these companies are used. Use at your own risk: the software is
+provided as is (see `LICENSE`); it can delete or move files, and it reports what your backup logs say;
+it does not prove a backup can be restored. Test a restore.
 
 ## Licence
 
