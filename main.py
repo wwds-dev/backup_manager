@@ -1306,10 +1306,16 @@ def _load_quota_history() -> dict:
     return {}
 
 
-def _append_quota_sample(account_key: str, used: int, total: int) -> None:
+def _append_quota_sample(account_key: str, used: int, total: int,
+                         drive: int | None = None, trash: int | None = None) -> None:
     history = _load_quota_history()
     samples = history.get(account_key, [])
-    samples.append({"ts": datetime.now().isoformat(timespec="minutes"), "used": used, "total": total})
+    sample = {"ts": datetime.now().isoformat(timespec="minutes"), "used": used, "total": total}
+    if drive is not None:
+        sample["drive"] = drive
+    if trash is not None:
+        sample["trash"] = trash
+    samples.append(sample)
     samples = samples[-_QUOTA_HISTORY_MAX:]
     history[account_key] = samples
     try:
@@ -1323,8 +1329,8 @@ def _get_quota_history(account_key: str) -> list:
     return _load_quota_history().get(account_key, [])
 
 
-def _last_known_quota(account_key: str):
-    """(used, total, ts) of the newest usable history sample, or None."""
+def _newest_usable_sample(account_key: str):
+    """(used, total, ts, sample) of the newest usable history sample, or None."""
     samples = _get_quota_history(account_key)
     if not isinstance(samples, list):
         return None
@@ -1334,8 +1340,36 @@ def _last_known_quota(account_key: str):
         except (KeyError, TypeError, ValueError, OverflowError):
             continue
         if total > 0 and used >= 0:
-            return used, total, ts
+            return used, total, ts, sample
     return None
+
+
+def _last_known_quota(account_key: str):
+    """(used, total, ts) of the newest usable history sample, or None."""
+    found = _newest_usable_sample(account_key)
+    return found[:3] if found else None
+
+
+def _last_known_split(account_key: str):
+    """(drive, trash) stored with the same sample `_last_known_quota` returns, or None.
+
+    Samples written before the split existed have no `drive` key and give None.
+    """
+    found = _newest_usable_sample(account_key)
+    if not found:
+        return None
+    sample = found[3]
+
+    def as_int(key):
+        try:
+            return int(sample[key])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return None
+
+    drive = as_int("drive")
+    if drive is None:
+        return None
+    return drive, as_int("trash")
 
 
 def _format_as_of(ts: str, now: datetime) -> str:
@@ -1694,6 +1728,17 @@ class StorageTile(QFrame):
         self.detail_lbl.setWordWrap(True)
         layout.addWidget(self.detail_lbl)
 
+        # Google only: "Drive files" and "Photos, Gmail and other" (a difference, see
+        # cloud_quota.drive_split). Hidden unless a valid split was read.
+        self.split_lbls = []
+        for _ in range(2):
+            lbl = QLabel()
+            lbl.setObjectName("TileFree")
+            lbl.setWordWrap(True)
+            layout.addWidget(lbl)
+            lbl.setVisible(False)
+            self.split_lbls.append(lbl)
+
         if path is not None and exists:
             open_btn = link_button("Open in Finder →")
             open_btn.setStyleSheet(open_btn.styleSheet() + "font-size: 10px; padding: 2px 0;")
@@ -1761,8 +1806,27 @@ class StorageTile(QFrame):
             f"QProgressBar::chunk {{ border-radius:4px; background:{color}; }}"
         )
 
+    def _set_split(self, used, drive, trash):
+        """Show the Drive / other lines when `drive_split` says the split is valid, else hide them."""
+        drive_files, other, trash = cloud_quota.drive_split(used, drive, trash)
+        files_lbl, other_lbl = self.split_lbls
+        if drive_files is None:
+            files_lbl.setVisible(False)
+            other_lbl.setVisible(False)
+            return
+        files_text = f"Drive files {human_size(drive_files)}"
+        if trash is not None:
+            files_text += f"  ·  trash {human_size(trash)}"
+        files_lbl.setText(files_text)
+        other_lbl.setText(f"Photos, Gmail and other {human_size(other)}")
+        other_lbl.setToolTip("Total minus Drive files; the API does not separate Photos from Gmail.")
+        files_lbl.setToolTip("Drive files as Google reports them; trash is shown, not subtracted.")
+        files_lbl.setVisible(True)
+        other_lbl.setVisible(True)
+
     def set_usage(self, path, exists):
         self.pct = None
+        self._set_split(0, None, None)
         self._quota_token += 1  # any fetch still in flight is now stale
         self._checking = False
         if not exists:
@@ -1809,6 +1873,9 @@ class StorageTile(QFrame):
             f"{human_size(used)} used of {human_size(total)}  "
             f"(account quota, as of {_format_as_of(ts, datetime.now())})"
         )
+        split = _last_known_split(self.account_key)
+        if split is not None:
+            self._set_split(used, *split)
 
     def _start_quota_fetch(self):
         """Fetch email and quota off the UI thread; the result lands in _apply_quota."""
@@ -1876,17 +1943,21 @@ class StorageTile(QFrame):
             self.account_lbl.setVisible(True)
         if result is not None:
             used, total = result
+            drive = getattr(result, "drive", None)
+            trash = getattr(result, "trash", None)
+            self._set_split(used, drive, trash)
             if total:
                 self._set_bar(int(used / total * 100))
                 self.detail_lbl.setText(
                     f"{human_size(used)} used of {human_size(total)}  (account quota)"
                 )
-                _append_quota_sample(self.account_key, used, total)
+                _append_quota_sample(self.account_key, used, total, drive=drive, trash=trash)
                 self._refresh_sparkline()
             else:
                 self.bar.setValue(0)
                 self.detail_lbl.setText(f"{human_size(used)} used  (unlimited plan)")
             return
+        self._set_split(0, None, None)
         # Token likely expired or revoked
         expired = quota_error and ("400" in quota_error or "401" in quota_error)
         if expired:

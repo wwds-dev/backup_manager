@@ -54,6 +54,32 @@ DROPBOX_SCOPE = "account_info.read"
 
 
 # ----------------------------------------------------------------------------
+# Quota result. A (used, total) pair that existing callers unpack unchanged,
+# carrying an optional Google Drive split as attributes.
+# ----------------------------------------------------------------------------
+class Quota(tuple):
+    """(used, total) with optional `.drive` (usageInDrive) and `.trash` (usageInDriveTrash)."""
+
+    def __new__(cls, used, total, drive=None, trash=None):
+        self = super().__new__(cls, (used, total))
+        self.drive = drive
+        self.trash = trash
+        return self
+
+
+def drive_split(used, drive, trash):
+    """(drive_files, other, trash) for the Google tile.
+
+    `other` is `used - drive`, a difference and not a read value (Photos and Gmail cannot be
+    told apart). It is given only when `drive` is known and 0 <= drive <= used; otherwise the
+    first two are None. Trash is passed through and never subtracted.
+    """
+    if drive is None or drive < 0 or drive > used:
+        return None, None, trash
+    return drive, used - drive, trash
+
+
+# ----------------------------------------------------------------------------
 # Local storage for the OAuth client app credentials and per-account tokens.
 # Never commit .secrets/ — it's gitignored.
 # ----------------------------------------------------------------------------
@@ -253,7 +279,9 @@ def google_quota(account_key):
     quota = resp.json().get("storageQuota", {})
     used = int(quota.get("usage", 0))
     total = int(quota["limit"]) if "limit" in quota else None  # unlimited plans omit it
-    return used, total
+    drive = int(quota["usageInDrive"]) if "usageInDrive" in quota else None
+    trash = int(quota["usageInDriveTrash"]) if "usageInDriveTrash" in quota else None
+    return Quota(used, total, drive=drive, trash=trash)
 
 
 # ----------------------------------------------------------------------------
