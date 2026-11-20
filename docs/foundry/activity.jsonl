@@ -74,3 +74,5 @@
 {"ts": "2026-11-20T18:58:06", "phase": "build", "state": "done", "spec": "more-storage-providers"}
 {"ts": "2026-11-20T19:26:15", "phase": "build", "state": "start", "spec": "more-storage-providers"}
 {"ts": "2026-11-20T19:28:14", "phase": "build", "state": "done", "spec": "more-storage-providers"}
+{"ts": "2026-11-20T18:58:30", "phase": "verify", "state": "start", "spec": "more-storage-providers"}
+{"ts": "2026-11-20T19:15:49", "phase": "verify", "state": "done", "spec": "more-storage-providers"}
