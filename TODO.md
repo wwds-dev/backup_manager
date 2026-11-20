@@ -131,7 +131,7 @@
 - [ ] `P3` `testing` `@ai` **Find the test that writes to the live `state.json`**: a `column_widths` entry for a table named `t` (no app table has that name) appeared in `~/Library/Application Support/Backup Control Center/state.json` and was later removed, which only `ResizableColumns.reset()` does (`main.py` ~4787). Likely a test that does not patch the state path, like the `icloud_du.log` overwrite above. Fix the test to use a temp state file. New chat, Sonnet low, ~5 min. Added 2026-11-20.
 - [ ] `P2` `testing` `@me` **Network trace to confirm no other outbound traffic** before the README Privacy claims are final (they now say "by design, per the code at this version, not yet measured"). Owner.
 - [ ] `P3` `docs` `@me` Check the company names in README "Not affiliated" (Google LLC, Dropbox, Inc., Microsoft Corporation, Proton AG, Apple Inc., The Qt Company) against each company's register; they are from the Comply report's knowledge, unchecked (Comply C-names).
-- [ ] `P3` `docs` `@ai` Reword the Proton tile text "No quota available (Proton has no public API)" to "no quota API this app can use" (Comply C18): `cloud_quota.py:643`, asserted by `tests/test_tile_links.py:103` and quoted in README (provider table), so it needs a test edit; README prose already changed.
+- [x] `P3` `docs` `@ai` Reword the Proton tile text "No quota available (Proton has no public API)" to "no quota API this app can use" (Comply C18): `cloud_quota.py:643`, asserted by `tests/test_tile_links.py:103` and quoted in README (provider table), so it needs a test edit; README prose already changed.
 
 ## v3 — blocked or deferred
 

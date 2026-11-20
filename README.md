@@ -66,7 +66,7 @@ folder is mounted in `~/Library/CloudStorage` (a folder named `GoogleDrive-…`,
 |---|---|
 | Google Drive, Dropbox, OneDrive | Real account quota ("X used of Y") once connected through OAuth (the sign-in flow where you approve access in your browser). Until connected, the mounted tile shows local disk space, labelled "(local disk)". |
 | iCloud Drive | Local cache size only, measured with `du` (Apple publishes no quota API). |
-| Proton Drive | Link only: the fixed text "No quota available (Proton has no public API)" (the UI string is unchanged for now; the README wording is "no quota API this app can use", see TODO). No bar, no percentage, no gauge, and no local-disk number. It is shown when a `ProtonDrive-*` folder is mounted or you add it by hand (**+ Add account**, "Proton Drive (link only, no quota)"; no sign-in needed). |
+| Proton Drive | Link only: the fixed text "No quota available (no quota API this app can use)". No bar, no percentage, no gauge, and no local-disk number. It is shown when a `ProtonDrive-*` folder is mounted or you add it by hand (**+ Add account**, "Proton Drive (link only, no quota)"; no sign-in needed). |
 
 Unmounted drives are hidden. Duplicate CloudStorage mounts for the same account are
 deduplicated. Tiles auto-refresh every 5 minutes **and** immediately when the Mac

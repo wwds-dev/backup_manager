@@ -182,7 +182,7 @@ Read first: `cloud_quota.py`, `StorageTile` (`main.py:1633-1900`), `StorageCard.
    lock around the whole refresh-then-store is required for Box and is reused by OneDrive (cheap). Overlapping
    fetches therefore cannot interleave a read of `tokens.json` with another's write.
 7. **Link-only tiles (Proton) and links:** `StorageTile` takes `has_quota` from the registry; when False it
-   never calls `set_usage` network or disk paths: fixed text "No quota available (Proton has no public API)",
+   never calls `set_usage` network or disk paths: fixed text "No quota available (no quota API this app can use)",
    bar hidden, `pct` stays None, and `refresh_gauges` skips it. One link button per tile (each account its own) from
    `registry.web_url` (Google: with `authuser=<email>`, email URL-encoded) when not mounted; "Open in Finder" when mounted (unchanged).
 8. **Gauges:** the four fixed slots stay; OneDrive adds a fifth only when a OneDrive tile exists. `Gauge`
