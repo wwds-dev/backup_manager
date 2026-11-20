@@ -306,7 +306,7 @@ def test_icloud_bytes_partial_total_when_du_errors(monkeypatch, tmp_path):
     n = main.icloud_local_bytes()
     assert n == 20 * 1024 and isinstance(n, main.PartialBytes)
     log = (tmp_path / "icloud_du.log").read_text()
-    assert "rc=1" in log and "Operation not permitted" in log and "/x/b" not in log
+    assert "rc=1" in log and "Operation not permitted" in log and "/x" not in log
     assert (tmp_path / "icloud_du.log").stat().st_mode & 0o077 == 0
 
 
@@ -321,9 +321,10 @@ def test_icloud_bytes_ok_is_not_partial(monkeypatch, tmp_path):
 
 
 def test_icloud_bytes_timeout_and_garbage_are_none(monkeypatch, tmp_path):
-    _fake_du(monkeypatch, tmp_path, 1, "", "timed out after 30 seconds")
+    _fake_du(monkeypatch, tmp_path, 1, "", "Command '['du', '-sk', '/x']' timed out after 30 seconds")
     assert main.icloud_local_bytes() is None
-    assert "timed out" in (tmp_path / "icloud_du.log").read_text()
+    log = (tmp_path / "icloud_du.log").read_text()
+    assert "timed out" in log and "/x" not in log
     _fake_du(monkeypatch, tmp_path, 1, "garbage\n", "")
     assert main.icloud_local_bytes() is None
 
@@ -335,7 +336,8 @@ def test_icloud_bytes_not_downloaded_items_keep_total_exact(monkeypatch, tmp_pat
     n = main.icloud_local_bytes()
     assert n == 16428 * 1024 and not isinstance(n, main.PartialBytes)
     log = (tmp_path / "icloud_du.log").read_text()
-    assert "not_downloaded=2 other_errors=0" in log and "/x/a" not in log
+    assert "not_downloaded=2 other_errors=0" in log and "total_kb=16428" in log
+    assert "/x" not in log
 
 
 def test_icloud_bytes_mixed_errors_stay_partial(monkeypatch, tmp_path):
@@ -349,6 +351,22 @@ def test_icloud_bytes_mixed_errors_stay_partial(monkeypatch, tmp_path):
 def test_icloud_bytes_rc1_without_stderr_is_partial(monkeypatch, tmp_path):
     _fake_du(monkeypatch, tmp_path, 1, "8\t/x\n", "")
     assert isinstance(main.icloud_local_bytes(), main.PartialBytes)
+
+
+def test_icloud_bytes_dataless_text_must_match_exactly(monkeypatch, tmp_path):
+    # Review P3-3: a longer error that only contains the EDEADLK text is not "not downloaded".
+    _fake_du(monkeypatch, tmp_path, 1, "8\t/x\n", "du: /x/a: Resource deadlock avoided extra\n")
+    assert isinstance(main.icloud_local_bytes(), main.PartialBytes)
+
+
+def test_icloud_log_has_no_path_from_split_file_name(monkeypatch, tmp_path):
+    # Review P3-1: a file name with a newline splits a stderr line; the fragment must not be
+    # logged and counts as an unparsed error, so the total is partial.
+    err = "du: /x/secret\nname: Resource deadlock avoided\n"
+    _fake_du(monkeypatch, tmp_path, 1, "8\t/x\n", err)
+    assert isinstance(main.icloud_local_bytes(), main.PartialBytes)
+    log = (tmp_path / "icloud_du.log").read_text()
+    assert "secret" not in log and "/x" not in log and "unparsed error" in log
 
 
 def test_icloud_tile_text_partial():

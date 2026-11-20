@@ -63,3 +63,16 @@ the EDEADLK-means-dataless reading against Apple documentation (based on known
 Verified 2026-11-20 17:32 on the installed v2.166 (restarted): `icloud_du.log` reads
 `rc=1 out='16428…' not_downloaded=2 other_errors=0 err=''`, so the card shows the exact
 total ("16.0 MB local cache"). The card text itself was not screenshotted.
+
+## Review fixes 2026-11-20 (owner: "yes, have it fix the three P3 items")
+Review report: `docs/audit/icloud-unavailable-review.md` (no P0/P1, four P3). Fixed P3-1 to P3-3;
+P3-4 (phase order) left as is on the owner's word.
+- P3-1 log hygiene: `icloud_du.log` now logs `total_kb=<number>` instead of du's stdout, and
+  error text only from `du: <path>: <error>` lines (`_du_error_texts`); a timeout logs
+  "timed out", any other stderr line (e.g. a file-name fragment) "unparsed error" and counts as
+  an other error. Tests assert no `/x` in the log.
+- P3-2: the comments now say cloud-only *directories* cannot be listed; nothing below them is local.
+- P3-3: the dataless match stays exact; new test with "Resource deadlock avoided extra".
+- Tests: 2 new, 3 tightened; 5 mutations caught (including the one the review found surviving).
+  Full suite: no failures; pytest still exits 139 at interpreter teardown (known TODO item).
+  The suite left the live `icloud_du.log` untouched (mtime unchanged).
