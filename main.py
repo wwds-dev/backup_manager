@@ -1850,7 +1850,7 @@ class ICloudTile(QFrame):
     measured = Signal()  # the du finished; pct/detail are final
 
     class _Worker(QThread):
-        done = Signal(object)  # int bytes or None
+        done = Signal(object)  # int bytes, None, or ICLOUD_DENIED
         def run(self):
             size = icloud_local_bytes()
             if size is None and icloud_access_denied():
@@ -1903,7 +1903,7 @@ class ICloudTile(QFrame):
         self._worker.done.connect(self._on_done)
         start_thread(self._worker)
 
-    def _on_done(self, size: int | None):
+    def _on_done(self, size):
         self._apply_size(size)
         self.measured.emit()
 
@@ -1911,7 +1911,7 @@ class ICloudTile(QFrame):
         bar_bg = "#48484A" if _DARK else "#E5E5EA"
         if size is None or size == ICLOUD_DENIED:
             self.detail_lbl.setText(
-                "No access: allow Full Disk Access" if size == ICLOUD_DENIED else "Unavailable")
+                "No access (Full Disk Access)" if size == ICLOUD_DENIED else "Unavailable")
             self.bar.setStyleSheet(
                 f"QProgressBar {{ border:none; border-radius:4px; background:{bar_bg}; height:6px; }}"
                 f"QProgressBar::chunk {{ border-radius:4px; background:{bar_bg}; }}"

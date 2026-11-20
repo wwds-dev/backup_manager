@@ -248,7 +248,7 @@ def test_icloud_access_denied_only_on_permission_error(monkeypatch):
 
 
 def test_icloud_tile_text_denied_unavailable_and_size():
-    assert _tile_text(main.ICLOUD_DENIED) == "No access: allow Full Disk Access"
+    assert _tile_text(main.ICLOUD_DENIED) == "No access (Full Disk Access)"
     assert _tile_text(None) == "Unavailable"
     assert "local cache" in _tile_text(2048)
 

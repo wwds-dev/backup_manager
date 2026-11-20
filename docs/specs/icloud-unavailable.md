@@ -9,7 +9,7 @@ fixable cause: the app needs Full Disk Access.
 **User.** The owner, reading Overview and the storage tiles.
 
 **Success measure.** When reading the iCloud folder is denied (PermissionError), the tile
-and the Overview gauge detail read "No access: allow Full Disk Access" instead of
+and the Overview gauge detail read "No access (Full Disk Access)" instead of
 "Unavailable"; any other failure still reads "Unavailable"; a successful `du` is unchanged.
 Tests cover denied, other failure and success, and are mutation-checked.
 
