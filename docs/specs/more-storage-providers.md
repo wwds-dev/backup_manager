@@ -215,4 +215,4 @@ bound to `127.0.0.1` only (already); atomic 0600 token writes; no token or code 
 registry-only URLs opened.
 
 ## Architect approval
-Pending. Do not build before the owner's explicit yes.
+Approved by the owner 2026-11-20 ("Approve"). Build may start.
