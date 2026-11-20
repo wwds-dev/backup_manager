@@ -49,3 +49,44 @@ No CHANGELOG file exists (app-context says changes live in TODO and spec logs); 
 - `main.py:2289-2293` Cloud Accounts text says "Client ID/Secret or App Key/Secret"; OneDrive has no secret.
 - No CHANGELOG file and no version bump decided (TODO has the open item); README test-count not stated.
 - Onboarding gap: the in-app Documentation viewer does not list the OneDrive setup; README is the only place.
+
+## Update after Secure and Verify-gap fixes (2026-11-20, feature tip f050c9d)
+Docs only; no `.py`, test or `docs/legal` file changed. Playbook still `last-reviewed: 2026-10-14`, `status: current`.
+
+### What changed
+- `README.md`: new "Sign-in safety" note under the Cloud accounts bullet; config-file table (modes 600 for
+  `app_credentials.json` and `manual_accounts.json`, `quota_history.json` marked not locked down, a paragraph on the
+  0700 folder and atomic writes); Tests section (conftest isolation and its gap; `test_oauth_hardening.py` listed).
+- `SECURITY.md`: first paragraph only (0700 folder, 0600 credential and manual-accounts files written atomically,
+  `state`, PKCE, loopback listener). Nothing else touched; no legal conclusion.
+- `TODO.md`: duplicate open Secure item and the open "Review P3-5 leftovers" item removed (both fixed); the done Secure
+  item now says "not released", 507 tests, PKCE and live sign-in not tested; new open item for the suite writing the
+  live `quota_history.json` and `state.json`. Open items kept: P3-3, P3-4, P3-5, quota history mode, stale copy, double
+  history read.
+- No earlier README text claimed Google/Dropbox lacked `state`, 0644 or body text; nothing contradicted needed removing.
+
+### Verified against code
+- `state` (`token_urlsafe(32)`) and `_redirect_code` with `compare_digest`: Google `cloud_quota.py:306,316,319`,
+  Dropbox `:392,401,404`, OneDrive `:520,529,532`; `_redirect_code` `:491-499`.
+- PKCE S256: Google `:314-315,329`, Dropbox `:399-400,414`, OneDrive `:527-528,541`.
+- Listener binds `127.0.0.1` only `:287` (`_ReusableHTTPServer(("127.0.0.1", port), Handler)`); `ThreadingHTTPServer`,
+  daemon threads `:224-229`; 5 s handler timeout `:233,261`; request without `code`/`error` gets 404 and the wait continues
+  `:266-269`; first response wins `:270-274`.
+- Error text: `_oauth_error_text` `:502-510` (status plus a short `[A-Za-z0-9_.-]` code); used at `:332,417,545`.
+- Folder 0700 and chmod on every write `:99-102`; `save_app_credentials` `:109-110`, `save_manual_accounts` `:190-191` and tokens
+  `:145` all use `_write_json_atomic` (mkstemp, fchmod 0600, os.replace) `:113-125`.
+- `tests/conftest.py:8-16` patches `SECRETS_DIR`, `CREDENTIALS_FILE`, `TOKENS_FILE`, `MANUAL_ACCOUNTS_FILE`; `main.py:1200` (`_STATE_FILE`)
+  and `:1297` (`_QUOTA_HISTORY_FILE`) are not patched; quota history is written with plain `write_text` `main.py:1325`.
+- `tests/test_oauth_hardening.py` exists (20 test functions by `grep`).
+
+### Not verified
+- Google's acceptance of PKCE for the Desktop client type: not verified (no live sign-in). No live Google, Dropbox or OneDrive
+  sign-in was run. The suite was not re-run here (spec fix logs say 507 tests, 0 failures, exit 139 at Qt teardown).
+- That the suite actually writes the live `quota_history.json` and `state.json` was not run; it follows from the unpatched paths.
+- The resulting file and folder modes were read from code, not checked on a disk; the spec's tests cover them under umask 022.
+- The README line giving 5 seconds and the 404 behaviour rests on the code and the spec's loopback tests, not a manual run.
+
+### Still open
+- TODO still has an older open "Document pass for more storage providers" item (README done earlier; CHANGELOG and version remain
+  an owner decision; no CHANGELOG file exists).
+- Review P3-2 stale copy remains an open code item.
