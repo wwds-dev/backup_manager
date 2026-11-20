@@ -1,105 +1,95 @@
-# Verify: spec `more-storage-providers` (Foundry phase 7)
+# Verify (re-run): spec `more-storage-providers` (Foundry phase 7)
 
-- Spec: `docs/specs/more-storage-providers.md`
-- Commit under test: `4965f9d` (scratch detached worktree, mutated and restored only there)
-- Date: 2026-11-20 · Role: qa-engineer
-- Playbook `docs/playbooks/qa-engineer.md`: `last-reviewed: 2026-10-14`, `status: current` (37 days, not stale).
+- Commit under test: `54c3907` (scratch detached worktree `vwt2`; mutated and restored only there). Previous report was on `4965f9d`.
+- Date 2026-11-20, role qa-engineer. Playbook `last-reviewed: 2026-10-14`, `status: current` (37 days, not stale).
+- Test command: `QT_QPA_PLATFORM=offscreen <venv python> -m pytest -q -p no:warnings` from vwt2.
 
-**Read first: this verifies 4965f9d WITHOUT the Build session's P2 and tooltip fixes. They have not landed.** Both P2 findings and the Photos tooltip are reproduced below on this commit and are still open. Verdict: **FAIL until the two P2 and the tooltip are fixed and re-verified** (0 P0/P1, 3 failing or weak Success-measure points, 1 live-data issue that predates this work).
+## Re-verify at 54c3907
 
-## 1. Success-measure verdict per bullet
+**Overall verdict: PASS** (0 P0/P1; the three failed bullets 4b, 7, 11 now pass; the pre-existing P2-3 live-data leak is unchanged and is not caused by this spec; owner should decide to defer it).
 
-All test commands: `QT_QPA_PLATFORM=offscreen <venv python> -m pytest -q -p no:warnings <file>` in the vwt dir. Targeted run of the 7 relevant files: `113 passed`.
-
-| # | Bullet | Evidence (test) | Verdict |
+### 1. The three failed bullets
+| # | Bullet | New tests | Result at 54c3907 |
 |---|---|---|---|
-| 1 | OneDrive in Add Account | `test_provider_registry.py::test_add_account_combo_lists_quota_providers` (no explicit `"onedrive" in keys`; it counts quota providers, so removal is caught indirectly, mutation M6 killed) | pass (weak assertion) |
-| 2 | OneDrive tile "X used of Y" | `test_onedrive.py::test_tile_renders_used_of_total` (asserts "used of", "account quota", `pct == 25`) | pass |
-| 3 | Mounted `OneDrive-*` gets Connect link; mount prefix | `test_mount_prefix[3 names]`, `test_mounted_unconnected_tile_has_connect_link`. Names tested all contain a dash; a bare "OneDrive" folder is untested (M13 survived, near-equivalent) | pass |
-| 4 | Refresh stores rotated token | `test_refresh_stores_rotated_token_atomically` (token, other entries kept, mode 0600, no temp files), `test_overlapping_refreshes_use_the_rotated_token`; M10 and reviewer M5 killed | pass |
-| 4b | ...and a disconnect during a refresh | no test. Throwaway probe: after disconnect mid-refresh `tokens.json` = `{'OneDrive-Personal': {'refresh_token': 'new'}}`, `is_connected: True` (revoked token back on disk, no `provider`) | **fail** (P2-1, reviewer's, reproduced) |
-| 5 | 400/401 shows reconnect | `test_onedrive.py::test_tile_401_shows_reconnect`, `test_quota_fallback.py::test_expired_token_path_is_unchanged`, `test_quota_401_raises_with_status`; M4 killed. Detection is a substring test on `str(e)` (`main.py` `_render_quota`: `"400" in quota_error`), pre-existing design | pass |
-| 6 | Failed call shows last-known, never local-disk | `test_quota_fallback.py::test_failed_call_shows_last_known_sample_not_local_disk`, `test_real_network_errors_do_not_show_local_disk`, `test_onedrive.py::test_tile_failed_call_never_shows_local_disk`; M7 killed by 6 tests. The OneDrive test has no history so it proves "no local disk" and "unavailable", not last-known (that is covered by the Google and fallback tests) | pass |
-| 7 | OneDrive total 0 / unlimited | not in the bullets but it is a false claim on the tile. Throwaway probe: Graph `{"used":5,"total":0,"state":"exceeded"}` gives `quota == (5, None)` and tile text `'5.0 B used  (unlimited plan)'` | **fail** (P2-2, reproduced) |
-| 8 | Split shown with `usage`, `usageInDrive`, `usageInDriveTrash` | `test_drive_split.py::test_tile_shows_two_lines`, `test_google_quota_reads_drive_and_trash`; M9 killed | pass |
-| 9 | Split hidden when `usageInDrive` absent or difference negative | `test_tile_hides_split_when_invalid[3 params]`, `test_split_missing_drive_gives_nothing`, `test_split_negative_difference_gives_nothing`; reviewer M1 killed | pass |
-| 10 | Trash never subtracted | `test_split_trash_is_passed_through_not_subtracted`; M14 killed | pass |
-| 11 | "Photos" never without "and other" | label text passes (`test_photos_never_alone`). **The tooltip fails it:** throwaway probe found `('Photos, Gmail and other 30.0 B', 'Total minus Drive files; the API does not separate Photos from Gmail.')`; "Photos" appears in `main.py` `_set_split` tooltip without "and other". The test only scans label text | **fail** (P3-1, reproduced; strictly breaks the bullet) |
-| 12 | Last-known keeps the split "as of" | `test_failed_call_shows_old_split_as_of`, `test_last_known_split_follows_the_same_sample_as_last_known_quota`, `test_history_keeps_split_and_old_samples_still_read`; M1 and M5 killed | pass |
-| 13 | Proton tile: no number, no bar, no gauge | `test_proton_tile_shows_no_number_no_bar` (fixed text, no digit, `bar.isHidden()`, `pct is None`, `disk_usage_for` raises if called), `test_manual_proton_tile_is_link_only`, `test_proton_never_gets_a_gauge`; M3 killed, reviewer M4 killed | pass |
-| 14 | Every tile has its own link, from the registry only | `test_every_tile_has_exactly_one_open_link` (4 tiles), `test_unmounted_tile_opens_registry_url`, `test_link_never_uses_an_api_value`, `test_every_registry_url_is_https_literal`, `test_google_link_authuser` (injection string yields no authuser), `test_icloud_tile_link`; M2 killed (specifically by `test_link_never_uses_an_api_value`). Note: a mounted tile with an unrecognised provider (`provider None`) gets no link; not a spec case, not tested | pass |
-| 15 | Quota off the UI thread | `test_quota_off_ui_thread.py::test_no_network_call_runs_on_the_gui_thread` (records thread ids), `test_tile_builds_fast_while_the_quota_call_is_slow`; `grep` of `main.py` shows only one call site, inside the `CallWorker` closure (line 1926; `account_email` at 1920; `connect` at 2270 is in `ConnectWorker`); `test_thread_lifetime.py` passes. The test exercises Dropbox only; Google and OneDrive use the same closure | pass |
-| 16 | Full suite green | see section 3 | pass (one mode) |
-| 17 | New logic mutation-checked | see section 5: 14 new mutants, 12 killed, 2 survived | pass with findings |
+| 4b | disconnect during a refresh stays disconnected | `test_onedrive.py::test_store_refresh_token_never_recreates_a_removed_account`, `::test_disconnect_mid_refresh_stays_disconnected` (disconnect from a second thread mid-refresh; asserts it was blocked on the refresh lock, entry stays gone, `is_connected` False, other account kept) | pass |
+| 7 | OneDrive total 0 is not "unlimited" | `::test_quota_zero_or_unusable_total_is_not_unlimited[0,"0",None,"abc",-5]`, `::test_tile_total_zero_says_not_reported` ("total not reported", no "unlimited", pct None, bar 0), `::test_tile_total_absent_still_unlimited` (guards the other branch) | pass |
+| 11 | "Photos" never without "and other", label and tooltip | `test_drive_split.py::test_photos_never_alone` now loops over `lbl.text()` and `lbl.toolTip()` with `count("Photos") == count("Photos, Gmail and other")` | pass |
 
-## 2. Test quality
-- Fakes, no network: `test_onedrive.py` autouse fixture replaces `requests.get/post` and `webbrowser.open` with an `AssertionError` raiser and redirects `SECRETS_DIR`, `TOKENS_FILE`, `CREDENTIALS_FILE`, `MANUAL_ACCOUNTS_FILE` and `_QUOTA_HISTORY_FILE` to `tmp_path`. `test_tile_links.py` makes `quota()` raise and captures `run_cmd`. `test_drive_split.py` patches `requests.get` per test only (no global network guard, acceptable). No model is called (app-context `## Models used`: None), so the live-eval rule does not apply.
-- Meaningful: the overlap test uses a single-use-token fake that returns 400 on a stale token, so removing the lock fails it (reviewer M2). The atomic-write test checks the old file and the directory listing after `os.replace` fails.
-- Weak spots: (a) `test_photos_never_alone` only inspects label text, so it cannot catch a tooltip (P3-1); it passes vacuously if no label contained "Photos" (the sibling test covers that). (b) `test_add_account_combo_lists_quota_providers` has no direct OneDrive assertion. (c) Tile-level `drive == 0` is untested (M11 survived). (d) `test_tile_failed_call_never_shows_local_disk` for OneDrive can pass on the placeholder alone. (e) No test for `total == 0`, disconnect-during-refresh, non-JSON 200 in `onedrive_connect`.
-- Over-mocking: `test_tile_401_shows_reconnect` patches `cloud_quota.quota` to raise `HTTPError("401 ...")`, so the real OneDrive 401 text chain is covered separately by `test_quota_401_raises_with_status`; acceptable.
-- No time dependence beyond a 0.05 s sleep widening a race window; thread tests use `wait(5000)`, not sleeps.
+**Not tautological.** Production hunks reverted (`git checkout 4965f9d -- cloud_quota.py main.py`), then `tests/test_onedrive.py tests/test_drive_split.py`:
+```
+FAILED test_store_refresh_token_never_recreates_a_removed_account
+FAILED test_disconnect_mid_refresh_stays_disconnected
+FAILED test_quota_zero_or_unusable_total_is_not_unlimited[0_0]  [None]  [abc]  [-5]
+FAILED test_tile_total_zero_says_not_reported
+FAILED test_photos_never_alone
+```
+8 failures on the old code. Parameter `"0"` (string) passes on the old code too (a non-empty string was truthy there and became 0); it is a harmless duplicate, the other four params carry the proof. Restored with `git checkout 54c3907 -- cloud_quota.py main.py`; `git diff 54c3907` empty.
 
-## 3. Full suite
-Command: `QT_QPA_PLATFORM=offscreen <venv python> -m pytest -q -p no:warnings --junitxml=...` (run 5 times in total, two with JUnit):
-- JUnit run 1 and run 2: `tests="455" failures="0" errors="0" skipped="1"`, 40 s. No flakiness seen.
-- Skipped: `tests/test_appkit_guard.py` (needs the `lab_hub` checkout beside the repo, per app-context).
-- The process exits **139 (segfault at Qt teardown) on every run**, as the Build log said. The review report said exit 0 and "not reproduced"; here it reproduced every time, and also on the base commit `d22d4c2` (run in a second scratch worktree, removed afterwards). Pre-existing, not a regression; results are read from the JUnit XML. A CI that uses the exit code will fail regardless (the owner should know).
-- Modes: app-context lists one mode (`pytest`); nothing else to run.
-- Coverage of changed lines: **not measured** (`pytest-cov` and `coverage` are not installed; app-context: no coverage target). Substituted by the mutation run and by reading the changed branches. Untested branches found: OneDrive `total == 0`, disconnect race, tile with `drive == 0`, `_oauth_error_text` with a non-JSON body.
+### 2. Full suite
+- Run 1 and run 2 (JUnit XML): `tests="464" failures="0" errors="0" skipped="1"` both times (455 before + 9 new test cases: 2 + 5 params + 2 tile tests, minus none). No flakiness.
+- Skipped: `tests/test_appkit_guard.py` (needs the `lab_hub` checkout, per app-context).
+- Exit code: run 1 exit 0 (read via the pipe, so it is tail's, not pytest's); run 2 exit **139** (Qt teardown segfault), same as the previous report and base `d22d4c2`. Pre-existing; results are read from the JUnit XML. Intermittent in the pipe-less run, so a CI keyed on the exit code stays unreliable.
+- Modes: app-context lists one (`pytest`). Branch coverage: not measured (no `coverage` module); substituted by the mutants below and reading the new branches (`total` absent / numeric / junk / negative, `account_key in tokens`, lock order).
 
-## 4. Live app-data folder check
-`~/Library/Application Support/Backup Control Center`: 26 entries listed with `stat -f '%m %z %N'` before and after.
-- First run: `diff` shows exactly two changed files, `quota_history.json` (14025 to 15097 bytes, mtime changed) and `state.json` (mtime changed, size 469 unchanged). Everything else identical.
-- The installed app (pid 96488, `/Applications/Backup Control Center.app`) was running, so I separated its writes from the suite's:
-  - Idle for 20 s with no suite: no mtime change.
-  - Each single test file run alone with the real HOME: no change in any of the 26 files.
-  - **Full suite with a throwaway empty `HOME`:** `Library/Application Support/Backup Control Center/state.json` is created, containing `{"column_widths": {"t": [300, 100, 165]}}`, the fixture from `tests/test_resizable_columns.py`. The live `state.json` also contains this `"t"` entry. So a full-suite run writes `state.json` outside any `tmp_path`.
-  - **Full suite with the real HOME:** `quota_history.json` gets a new sample for all three accounts (Dropbox, two Google) stamped at the suite's end minute; reproduced on 4 whole-suite runs, none on single files.
-  - **Same behaviour on base commit `d22d4c2`** (state.json created under a fake HOME; quota_history.json changed under the real HOME). It is therefore pre-existing and not caused by this spec, and the new four test files alone, run under a fake HOME, write nothing.
-- Not proven: that the suite makes a live Google/Dropbox call with the owner's tokens (the history samples suggest so; the running app could also write them). Cause is an order-dependent leak across files; not isolated to one test.
-- Verdict: **fail for the repo-wide rule "a run never touches live data" (app-context Test bar), pre-existing**; the new tests comply.
+### 2b. Live app-data folder (`~/Library/Application Support/Backup Control Center`)
+`stat -f '%m %z %N'` over every file (22 files) before and after two full-suite runs: `diff` shows exactly two changed files, `quota_history.json` (mtime changed, size 14561 unchanged) and `state.json` (mtime changed, size 469 unchanged). Identical to the previous report (same two files). The installed app was running (2 processes), so as before part of this may be the app; the earlier fake-HOME and single-file isolation (state.json created from the `tests/test_resizable_columns.py` fixture; history written only by whole-suite runs; same on base `d22d4c2`) still stands. **Pre-existing leak unchanged; not made worse by this diff** (the diff touches only `cloud_quota.py`, `main.py` and two test files, all fakes with `tmp_path`).
 
-## 5. Mutation check (new mutants; the reviewer's M1-M5 and the Build log's 16 not reused)
-Each mutant planted by exact-string replace in the scratch worktree; tests run: the 9 relevant files (`test_drive_split`, `test_provider_registry`, `test_onedrive`, `test_tile_links`, `test_quota_off_ui_thread`, `test_quota_fallback`, `test_overview`, `test_thread_lifetime`, `test_replace_worker`); reverted with `git checkout -- <file>` after each.
+### 3. New mutations aimed at the fixes (scratch only; `git checkout -- .` after each; `git status --short` empty and HEAD `54c3907` at the end)
+Tests run: `test_onedrive`, `test_drive_split`, `test_provider_registry`, `test_tile_links`, `test_quota_fallback`, `test_overview`, `test_thread_lifetime`, `test_quota_off_ui_thread`, `test_replace_worker`.
 
 | # | Mutation | Result | Killed by |
 |---|---|---|---|
-| M1 | `_append_quota_sample` ignores `drive`/`trash` keys | Killed | `test_drive_split::test_history_keeps_split_and_old_samples_still_read`, `::test_successful_call_records_split` |
-| M2 | Open link takes its URL from the account label instead of the registry | Killed | `test_tile_links::test_link_never_uses_an_api_value` (plus 5 link tests) |
-| M3 | `_OPTIONAL_GAUGES` gains `"proton"` (gauge slot for Proton) | Killed | `test_tile_links::test_proton_never_gets_a_gauge` |
-| M4 | expired-token path removed (`expired = False`) | Killed | `test_onedrive::test_tile_401_shows_reconnect`, `test_quota_fallback::test_expired_token_path_is_unchanged` |
-| M5 | failed call drops the old split (`_show_last_known` without split) | Killed | `test_drive_split::test_failed_call_shows_old_split_as_of` |
-| M6 | Add Account omits OneDrive | Killed (indirectly) | `test_provider_registry::test_add_account_combo_lists_quota_providers` |
-| M7 | failed call shows "used of ... (local disk)" | Killed | 6 tests incl. `test_onedrive::test_tile_failed_call_never_shows_local_disk` |
-| M8 | OneDrive total read from `remaining` | Killed | `test_onedrive::test_quota_reads_graph` |
-| M9 | Google split reads `usage` as `usageInDrive` | Killed | `test_drive_split::test_google_quota_reads_drive_and_trash` |
-| M10 | rotation inverted (store only when unchanged) | Killed | `test_onedrive::test_refresh_stores_rotated_token_atomically`, `::test_overlapping_refreshes_use_the_rotated_token` |
-| M11 | tile hides the split when `drive == 0` (`if not drive_files`) | **Survived** | none |
-| M12 | reconnect also on "503" in the error | Killed | 6 tests, incl. `test_quota_fallback::test_failed_call_shows_last_known_sample_not_local_disk` |
-| M13 | OneDrive mount prefix `"OneDrive-"` instead of `"OneDrive"` | **Survived** | none (near-equivalent: every tested name has a dash; a bare "OneDrive" folder would stop matching) |
-| M14 | trash folded into "other" | Killed | `test_drive_split::test_split_valid`, `::test_split_trash_is_passed_through_not_subtracted` |
+| N1 | `disconnect` without the refresh lock (`with _TOKENS_LOCK:` only) | Killed | `test_disconnect_mid_refresh_stays_disconnected` |
+| N2 | tile treats `total == 0` as unlimited again (`elif not total:`) | Killed | `test_tile_total_zero_says_not_reported` |
+| N3 | tooltip reverted to the old "Photos from Gmail" text | Killed | `test_photos_never_alone` |
+| N4 | `_store_refresh_token` recreates a removed account | Killed | `test_store_refresh_token_never_recreates_a_removed_account` |
+| N5 | `onedrive_quota`: total 0 becomes None (`int(...) or None`) | Killed | `test_quota_zero_or_unusable_total_is_not_unlimited[0_0,0_1,-5]` |
+| N6 | junk/null total becomes None | Killed | `...[None]`, `...[abc]` |
+| N7 | negative total kept | Killed | `...[-5]` |
+| M11 (earlier survivor) | tile hides the split when `drive == 0` (`if not drive_files`) | **Survived** | none: tile-level `drive == 0` is still untested |
+| M13 (earlier survivor) | OneDrive mount prefix `"OneDrive-"` instead of `"OneDrive"` | **Survived** | none: no test with a bare `OneDrive` folder name |
 
-12 of 14 killed. After each mutant and at the end: `git status --short` in the vwt is empty, HEAD `4965f9d` (confirmed twice). The throwaway worktree for the base commit was removed (`git worktree remove`); no file in the repo or the real checkout was edited (`git status` of the real checkout shows only the pre-existing `docs/foundry/activity.jsonl`). Throwaway tests (`test_p2_demo.py`, `test_photos_demo.py`) live in the scratchpad `throwaway/` folder, not the repo.
+7 of 7 new mutants killed; the two earlier survivors are unchanged (P3, safe degrade / near-equivalent), not addressed by the fix commits, which the owner did not ask for.
+Side note: during the N5 to N7 runs an untracked file named `None` (16 bytes) appeared in the vwt2 root; it was not there on a clean run of `test_onedrive.py` at 54c3907. It looks like a test writing to a path built from a `None` under a broken `total`; not investigated further, removed (scratch only). Worth a look by Build if it recurs on the real code (not seen at 54c3907).
 
-## 6. Findings, ranked
-| P | Finding | Evidence | Fix owner |
-|---|---|---|---|
-| P2-1 | Refresh in flight during disconnect re-creates the account with the revoked token and no `provider`; `is_connected` True, `quota()` None, tile "Account quota unavailable" with no reconnect button. No test. | throwaway `test_p2_1_...`: `TOKENS AFTER: {'OneDrive-Personal': {'refresh_token': 'new'}} is_connected: True`; code `cloud_quota.py` `_store_refresh_token`, `disconnect` | Build (open, not landed) |
-| P2-2 | OneDrive `total == 0` is shown as "unlimited plan" (false claim; `quota.state` unread). | throwaway `test_p2_2_...`: `TILE TEXT: '5.0 B used  (unlimited plan)' quota: (5, None)`; `cloud_quota.py` `onedrive_quota` | Build (open, not landed) |
-| P2-3 | The full suite writes to the owner's live `state.json` (test column-width fixture) and, with real tokens present, appends to the live `quota_history.json`; order-dependent, pre-existing since at least `d22d4c2`. Breaks the Test bar rule and pollutes the owner's settings. | section 4 | Build or a separate task; not caused by this spec; owner to decide to defer |
-| P3-1 | Tooltip says "Photos" without "and other"; breaks the Success-measure bullet to the letter; the guarding test checks labels only. | `main.py` `_set_split`; probe in section 1 row 11 | Build (open, not landed) |
-| P3-2 | Tile-level `drive == 0` untested (M11 survived): a valid split of 0 would be silently dropped; safe degrade. | M11 | Build: add one test |
-| P3-3 | No direct "OneDrive in Add Account" assertion; bare "OneDrive" mount prefix untested (M13). | M6, M13 | Build: add one assertion each |
-| P3-4 | Exit code 139 on every run (also on base); a CI keyed on the exit code cannot go green. | section 3 | owner / SRE |
-| P3-5 | Reviewer's P3-2 to P3-5 (stale "Google Drive or Dropbox" copy, two history reads per tile, redirect handler accepts first GET, pre-existing `resp.text[:200]` echo) not re-tested here. | `review.md` | per review |
+### 4. Other bullets unaffected
+`git diff 4965f9d 54c3907` touches `cloud_quota.py` (`_store_refresh_token`, `disconnect`, `onedrive_quota`), `main.py` (the split tooltip and the no-percentage branch of `_render_quota`) and tests only. Full suite 464 passed, 0 failed, so all earlier passing tests pass (bullets 1-3, 4, 5, 6, 8-10, 12-17). One thing changed by the diff that earlier tests did not cover: `elif total is None` / `else` in the tile now applies to any provider returning `total == 0` (Google/Dropbox); covered by the tile tests only for OneDrive's `Quota`, which is provider-independent. Disconnect now takes a lock that a refresh holds during a network call: a disconnect click blocks until that call returns (the Build log notes the request has a timeout; the blocking-on-the-UI-thread effect is not measured, see not verified).
 
-## 7. Not verified
+## Updated per-bullet verdicts
+| # | Bullet | Verdict now |
+|---|---|---|
+| 1 | OneDrive in Add Account | pass (weak assertion, P3-3) |
+| 2 | OneDrive tile "X used of Y" | pass |
+| 3 | Mounted OneDrive-* Connect link | pass (bare name untested, M13) |
+| 4 | Refresh stores rotated token | pass |
+| 4b | Disconnect during refresh | **pass** (was fail) |
+| 5 | 400/401 reconnect | pass |
+| 6 | Failed call shows last-known | pass |
+| 7 | Total 0 not "unlimited" | **pass** (was fail) |
+| 8-10, 12 | Google split, hidden cases, trash, last-known split | pass |
+| 11 | "Photos" only with "and other" (label and tooltip) | **pass** (was fail) |
+| 13-15 | Proton, links, off UI thread | pass |
+| 16 | Full suite green | pass (464/0/0, 1 skipped) |
+| 17 | New logic mutation-checked | pass (7/7 new killed; 2 earlier survivors open, P3) |
+
+## Open findings, ranked
+| P | Finding | Status |
+|---|---|---|
+| P2-3 | Full suite writes the owner's live `state.json` and (with tokens) `quota_history.json`; pre-existing since `d22d4c2` | open, unchanged; owner to defer or schedule |
+| P3-1 | Disconnect can block on an in-flight refresh (UI thread wait) | new, not measured |
+| P3-2 | Tile `drive == 0` untested (M11) | open |
+| P3-3 | No direct "OneDrive in Add Account" assertion; bare "OneDrive" prefix untested (M13) | open |
+| P3-4 | Exit 139 at Qt teardown (intermittent in this run), CI keyed on exit code cannot be relied on | open, pre-existing |
+| P3-5 | Reviewer's P3s left on purpose (stale copy, double history read, redirect GET, Google/Dropbox `state`) | deferred per fix log |
+
+## Not verified
 - Branch coverage of changed lines (no `coverage` module).
-- Any live call: OneDrive sign-in (no Entra app), real Google `storageQuota` formula (needs the owner's yes), Dropbox.
-- Visual layout: no screenshot, app not built or installed; the fifth Overview gauge column is tested with `FakeTile` only.
-- Whether the suite really sends live API calls with the owner's tokens (only the resulting history writes were observed); which test leaks to the live folder.
-- Several accounts of one provider with the fullest-account gauge for OneDrive.
-- The Build session's fixes (not landed); everything above is on `4965f9d`.
-- Secure phase items (Files.Read scope width, `state` rollout to Google and Dropbox, atomic `app_credentials.json` write): out of QA scope.
-- The "memory" facts in the spec (Entra loopback port, Graph scopes, `usageInDrive` semantics).
-- Whether `str | None` in the `Provider` dataclass runs on the Python version the PyInstaller build uses (the venv ran it).
+- Live calls (OneDrive sign-in, real Google `storageQuota`, Dropbox).
+- Visual layout / screenshots; the "total not reported" wording on screen.
+- Whether a disconnect click visibly freezes the UI while a refresh is in flight.
+- Which test leaks to the live folder; whether the suite makes live API calls.
+- Secure-phase items, spec "memory" facts, Python-version compatibility of `str | None` in the PyInstaller build.
+
+---
+# History: verify at 4965f9d (previous report, verdict FAIL)
+Kept as in `verify.md`: 14 mutants M1-M14 (12 killed; M11, M13 survived), findings P2-1 (disconnect race), P2-2 (total 0 shown as unlimited), P2-3 (live-folder leak), P3-1 (tooltip "Photos"), P3-2 to P3-5; suite 455/0/0, 1 skipped, exit 139. Full text: `/private/tmp/claude-501/-Users-as-Documents-lab-active-backup-manager--claude-worktrees-gifted-yonath-b68e3c/480b605c-79de-4832-9afa-ba934286025a/scratchpad/verify.md`.
