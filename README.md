@@ -205,8 +205,14 @@ a file, e.g. `imprint-base`) count as git repos.
 - **🗂 Workspace…** — old backup snapshots in the lab's `backups/` (offered when older than 30 days,
   setting 7-120, and no non-history doc names them; they go to the **Trash** after a record is saved,
   Put Back restores), cache folders outside `active/` (deleted, they regenerate), and a read-only list
-  of `archive/`. Nothing is ticked. A weekly report-only scan (on by default, switch in the dialog)
-  writes `workspace_report.json` and never deletes. The worktree age (default 14 days) is set here too.
+  of `archive/`. Nothing is ticked. A **Lab root** table below them is report-only (rule, path, size,
+  age, why, and a **Show in Finder** button; no tick box, nothing is deleted or moved): R1 a root file or
+  folder not named in the lab's `AGENTS.md` or `README.md` (dotfiles aside), R2 stale `*.bak` / `*.orig` /
+  `patch_*.py` leftovers, R3 a lingering `_to_delete/`, R4 an empty top-level folder, R5 an `active/*`
+  project not named there, R6 a root or `active/*` symlink that does not resolve. It reads listings and
+  those two files only and never follows a symlink. A weekly report-only scan (on by default, switch in
+  the dialog) writes `workspace_report.json` (with a `lab_root` list) and never deletes. The worktree age
+  (default 14 days) is set here too.
 - **🌿 Worktrees…** — lists the git worktrees under the lab (agent worktrees in
   `.claude/worktrees/`, `archive/` checkouts, `worktrees/`) and offers one only when **every**
   gate passes: clean (no uncommitted or untracked files), merged into the repo's default branch
@@ -585,6 +591,7 @@ Never use `QThread.terminate()`. Reviewed in `docs/audit/qthread-lifetime-review
 |---|---|
 | `main.py` | The whole GUI: sidebar window and Overview page, cards, menu-bar icon, Settings, scheduling, `--run-backup` / `--background` |
 | `workspace_extra.py` | Qt-free rules for 🗂 Workspace: backup gates and Trash, archive list, root caches, weekly report |
+| `lab_root_checks.py` | Qt-free, read-only rules R1-R6 for the Lab root table in 🗂 Workspace (what sits at the lab root that should not) |
 | `workspace.py` | Qt-free worktree rules for 🌿 Worktrees: gates, scan, restore record, removal |
 | `lab_health.py` | Qt-free Lab Health rules: cleanup, env use detection, rebuild records, commit warnings, thresholds, other caches |
 | `cloud_quota.py` | Google Drive / Dropbox OAuth and quota, manual accounts, the app-support folder (`SECRETS_DIR`) |

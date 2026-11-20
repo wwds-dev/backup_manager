@@ -1,6 +1,6 @@
 # Spec: lab-root checks (what is left of Folder Audit) in the Workspace section
 
-Status: **Define approved by the owner 2026-11-20** ("Approve, report-only", recorded in `approvals.jsonl`; this settles open question 2 as report-only; questions 1, 3 and 4 stay as proposed: separate monthly review, keep R5, a table in Workspace). Nothing is built; build waits for the owner's go. Requested by the
+Status: **Define approved by the owner 2026-11-20** ("Approve, report-only", recorded in `approvals.jsonl`; this settles open question 2 as report-only; questions 1, 3 and 4 stay as proposed: separate monthly review, keep R5, a table in Workspace). Built 2026-11-20 on `claude/lab-root-checks` (see Build and Verify below). Requested by the
 owner 2026-11-20 ("merge whatever is useful of Folder Audit into Backup Control Center"; he chose "draft
 spec for app rows"). Tier `public`. Builds on `docs/specs/workspace-cleanup.md` section 3, which split the
 work: `folder_audit.py` keeps what sits at the lab root by name, the app takes what is measured. This spec
@@ -93,3 +93,79 @@ a lab-repo change, done once the app row is released and the owner confirms Fold
    report-only. Trash moves would reuse the existing restore-record gates and add a write path to review.
 3. **R5 (project not named in `AGENTS.md`)**: keep, or drop? It did not fire for any of the 16 projects on 2026-11-20.
 4. **Where**: a table in 🗂 Workspace (proposed), or a separate row in Lab Health?
+
+## Build (2026-11-20, engineer, branch `claude/lab-root-checks`)
+
+Skipped phases: Design (a table in an existing dialog), Architect (Qt-free module, no state, thread or boundary;
+`workspace_report.json` only gained a key), Comply, Launch, Release (not part of this change). Review and Secure
+are still to do; version not bumped, app not built.
+
+What changed:
+- `lab_root_checks.py` (new, Qt-free): `scan(lab_root, now=None)` returns finding dicts `rule`, `path` (absolute),
+  `rel`, `size` (bytes, `None` over the walk cap of 50,000 entries), `age_days`, `why`. Reads directory listings,
+  `lstat` and `AGENTS.md` / `README.md` (opened read-only, only when a regular file, so a symlinked doc is not
+  read). A symlink is sized and aged by its own `lstat` and never listed into, walked or opened; the only call that
+  goes through a link is one `os.stat` on the link to learn whether it resolves (R6).
+- `workspace_extra.build_report` adds `lab_root`; `_write_private` is unchanged. The `offered_*` totals are not
+  affected (nothing there is offered).
+- `main.py`: `show_workspace` scans the lab root in the existing `CallWorker` (so `start_thread()` is still the only
+  start); `_workspace_ready` shows a `QTableWidget` (Rule, Path, Size, Age, Why, Show in Finder) after the archive
+  rows: plain-text, non-editable, non-checkable cells, one button per row running `open -R <path>`.
+- Tests: `tests/test_lab_root_checks.py` (25), 3 added to `tests/test_workspace_dialog.py`, 2 to
+  `tests/test_workspace_extra.py`.
+
+Choices to confirm (the spec text and `folder_audit.py` differ or are silent):
+1. R2 uses Folder Audit's root patterns (`*.bak`, `*.bak_*`, `*~`, `*.orig`, `*.tmp`, `patch_*.py`, `fix_*.py`,
+   `_patch*.py`), not the shorter `patch_*` / `fix_*` of the Define text, and, as the Define says, only at the lab root
+   (Folder Audit also looked at each project's top level).
+2. The docs read are `AGENTS.md` and `README.md` (the Define text); Folder Audit also read `CLAUDE.md` for names.
+   `CLAUDE.md` is only `@AGENTS.md` today and is always allowed.
+3. R5 keeps Folder Audit's exact match (a backtick directly before the project name, e.g. `` `proj` ``). A name seen only
+   as `` `active/proj/` `` does not count, as in Folder Audit, so it would be flagged.
+4. R1 skips an empty folder (R4's) and a broken symlink (R6's), so one fact is one finding. Folder Audit already did
+   this for empty folders.
+5. R6 also covers the lab root, as the Define says. Folder Audit only looked under `active/`; this is why the real
+   run below has two findings Folder Audit did not.
+
+## Verify (2026-11-20, same session as the build: not an independent QA pass)
+
+Suite: before the change 260 tests (259 passed, 1 skipped: `test_appkit_guard`); after 290 (289 passed, 1 skipped),
+0 failures. The pytest process still crashes at interpreter exit (exit 134 or 139) after all tests pass, which is the
+open TODO item from 2026-11-20 and is not new; counts come from `--junitxml`.
+
+Mutation check by hand (`scratchpad/mutate.py`, each mutant applied alone, the suite run, then reverted): 40 mutants,
+40 killed, 0 survived.
+
+| Mutant | Killed by |
+|---|---|
+| R1 condition flipped; dotfile allowance removed; always-OK names removed | clean lab, dotfile, one-per-rule tests |
+| R1 empty-folder skip or broken-link skip removed (double reports) | `test_r1_does_not_double_report...`, one-per-rule |
+| R2 condition flipped; a symlink counted as a file | clean lab; out-of-lab symlink test |
+| R3 condition flipped; R3 age taken from the newest file | clean lab; `test_r3_absent_and_present` |
+| R4 condition flipped; `active/` exclusion or disposable-name exclusion removed | clean lab, R4 scope test |
+| R5 condition flipped; dot-entry skip removed; a broken link also reported as a project | clean lab, R5 tests, R6 test |
+| R6 condition flipped; `active/` not scanned; root not scanned | R6 tests |
+| each of R1 to R6 removed (rule's report call replaced by a no-op) | one-per-rule |
+| symlink check made to follow links: `is_dir`, `is_file`, `os.walk(followlinks=True)`, `lstat` to `stat`, `is_symlink` always False, a doc read through a symlink | out-of-lab symlink tests, README-symlink test |
+| walk cap removed | `test_walk_cap_makes_size_unknown` |
+| scan writes a file; `os.open` for writing; runs a subprocess; opens a socket | `test_opens_nothing_for_writing_runs_no_subprocess_no_network` (tree before and after, `open`/`os.open` spies, patched `subprocess`, `socket`) |
+| report: `lab_root` key removed | `test_report_has_a_lab_root_list...` |
+| dialog: lab root not scanned; Show in Finder without `-R`; cells made checkable; table not shown | the three new dialog tests |
+
+Real read-only run against `/Users/as/Documents/lab` (`lab_root_checks.scan`, then the old script's
+`python3 -c "import folder_audit as f; [print(i['title']) for i in f.run_audit()['findings'] if i['status']!='good']"`,
+same day, nothing written or moved; `--serve` and the fixers not run):
+
+| | R1 | other |
+|---|---|---|
+| `lab_root_checks` | `build_marker.py` (15 KB), `runners` (861 MB), `setup_github.command` (4 KB) | R6: `lab_dashboard_data.json` and `lab_projects_monitor_page.html` (root symlinks to `dashboards/...` targets that do not exist) |
+| `folder_audit` | `build_marker.py`, `runners`, `setup_github.command` | none |
+
+R1 matches exactly. The two R6 rows are the root-symlink coverage that the Define added and Folder Audit never had;
+both targets are missing in `dashboards/` today (checked with `ls`), so they are real findings, not false ones.
+The `show_tracker` root symlink resolves and is named in the docs, so it is not reported.
+
+Not verified: the window itself (no screenshot; the table is covered offscreen by tests only), Show in Finder on the
+real Mac (`open -R` is asserted as the command, not run), the weekly scan firing in the installed app, a lab with more
+than 50,000 entries under one root folder (covered with a patched cap only), a symlink to an iCloud or network
+volume (`os.stat` on the link was not tried against one). No independent review, QA or Secure pass has run.
