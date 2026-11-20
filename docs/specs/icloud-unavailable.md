@@ -60,3 +60,6 @@ Tests: 3 new in `tests/test_main_window.py`; 3 mutations caught; full suite gree
 Not verified: the card on screen after a restart (screen access declined this session), and
 the EDEADLK-means-dataless reading against Apple documentation (based on known
 `setiopolicy_np` materialization behaviour).
+Verified 2026-11-20 17:32 on the installed v2.166 (restarted): `icloud_du.log` reads
+`rc=1 out='16428…' not_downloaded=2 other_errors=0 err=''`, so the card shows the exact
+total ("16.0 MB local cache"). The card text itself was not screenshotted.
