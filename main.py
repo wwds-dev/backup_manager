@@ -908,6 +908,10 @@ def cloud_services():
     return rows
 
 
+class PartialBytes(int):
+    """A du total taken although du reported errors: some folders were unreadable."""
+
+
 def icloud_local_bytes() -> int | None:
     """Bytes used by the local iCloud cache, or None if unavailable.
 
@@ -917,16 +921,19 @@ def icloud_local_bytes() -> int | None:
     started = time.monotonic()
     rc, out, err = run_cmd(["du", "-sk", str(HOME / "Library" / "Mobile Documents")], timeout=30)
     try:
-        (cloud_quota.SECRETS_DIR / "icloud_du.log").write_text(
+        log = cloud_quota.SECRETS_DIR / "icloud_du.log"
+        log.write_text(
             f"{datetime.now().isoformat(timespec='seconds')} rc={rc} "
             f"secs={time.monotonic() - started:.1f} out={out.strip()[-80:]!r} "
-            f"err={(err.strip().splitlines() or [''])[0][:200]!r}\n")
+            f"err={(err.strip().splitlines() or [''])[0].rsplit(': ', 1)[-1][:120]!r}\n")
+        os.chmod(log, 0o600)
     except OSError:
         pass
     lines = out.strip().splitlines()
     if lines:
         try:
-            return int(lines[-1].split("\t", 1)[0]) * 1024
+            n = int(lines[-1].split("\t", 1)[0]) * 1024
+            return n if rc == 0 else PartialBytes(n)
         except ValueError:
             pass
     return None
@@ -1964,7 +1971,9 @@ class ICloudTile(QFrame):
                 f"QProgressBar::chunk {{ border-radius:4px; background:{bar_bg}; }}"
             )
             return
-        self.detail_lbl.setText(f"{human_size(size)} local cache")
+        partial = isinstance(size, PartialBytes)
+        self.detail_lbl.setText(f"at least {human_size(size)} (some folders unreadable)" if partial
+                                else f"{human_size(size)} local cache")
         # Show bar relative to local disk total so it's meaningful
         usage = disk_usage_for(ICLOUD_DIR)
         if usage and usage.total > 0:

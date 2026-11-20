@@ -44,3 +44,6 @@ seconds, the tail of stdout and the first stderr line to `icloud_du.log` in the 
 folder (overwritten each run; a write failure is ignored), and uses the last `du` line as a
 partial total when `du` exits non-zero but printed one (it can understate the real size).
 Tests: 4 in `tests/test_main_window.py`; 4 mutations caught.
+Reviewer P1 fixed: a partial total is shown as "at least X (some folders unreadable)" (type
+`PartialBytes`), never as a plain size. P2 fixed: the log keeps only the error text (no paths)
+and is mode 0600; more tests (single-line rc 1, timeout, garbage). 4 more mutations caught.
