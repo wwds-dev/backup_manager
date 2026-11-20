@@ -66,7 +66,7 @@ folder is mounted in `~/Library/CloudStorage` (a folder named `GoogleDrive-…`,
 |---|---|
 | Google Drive, Dropbox, OneDrive | Real account quota ("X used of Y") once connected through OAuth (the sign-in flow where you approve access in your browser). Until connected, the mounted tile shows local disk space, labelled "(local disk)". |
 | iCloud Drive | Local cache size only, measured with `du` (Apple publishes no quota API). |
-| Proton Drive | Link only: the fixed text "No quota available (Proton has no public API)". No bar, no percentage, no gauge, and no local-disk number. It is shown when a `ProtonDrive-*` folder is mounted or you add it by hand (**+ Add account**, "Proton Drive (link only, no quota)"; no sign-in needed). |
+| Proton Drive | Link only: the fixed text "No quota available (Proton has no public API)" (the UI string is unchanged for now; the README wording is "no quota API this app can use", see TODO). No bar, no percentage, no gauge, and no local-disk number. It is shown when a `ProtonDrive-*` folder is mounted or you add it by hand (**+ Add account**, "Proton Drive (link only, no quota)"; no sign-in needed). |
 
 Unmounted drives are hidden. Duplicate CloudStorage mounts for the same account are
 deduplicated. Tiles auto-refresh every 5 minutes **and** immediately when the Mac
@@ -116,6 +116,9 @@ shows the old split with its "as of" time.
   shows only the HTTP status and the provider's short error code (for example
   `invalid_grant`), never the response body. Google's acceptance of PKCE has not been
   checked with a live sign-in.
+  Google note: while your Google OAuth consent screen is in **Testing** status, Google expires its
+  refresh tokens after 7 days (per Google's OAuth documentation; not checked with a live account here),
+  so you must reconnect weekly or publish the app.
 - **+ Add account** — monitor a quota-enabled account that has no local mount, or add a
   Proton Drive link tile.
 - Connected tiles with a known total show a **quota sparkline** (last 60 samples)
@@ -785,8 +788,9 @@ quota and stores only sizes. The links on each tile open the provider's own webs
 stores, in `~/Library/Application Support/Backup Control Center/`, your OAuth client details,
 per-account refresh tokens (plain JSON files readable only by your user, mode 0600; not the macOS
 Keychain), quota history, settings and records of the cleanups you ran. Removing an account in the app
-deletes only the local token; to revoke access go to the provider (Microsoft:
-<https://account.live.com/consent/Manage>, or <https://myapps.microsoft.com> for work or school
+deletes only the local token; to revoke access go to the provider (Google:
+<https://myaccount.google.com/permissions>; Dropbox: <https://www.dropbox.com/account/connected_apps>;
+Microsoft: <https://account.live.com/consent/Manage>, or <https://myapps.microsoft.com> for work or school
 accounts). Delete the folder to remove everything the app stores. This describes what the code does at
 the version in the window title, by design and per the code at this version; it has **not yet been
 measured with a network trace**, so treat "nothing else is sent" as the design, not a measured fact. It is
