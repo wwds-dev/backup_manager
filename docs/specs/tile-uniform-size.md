@@ -19,8 +19,8 @@ No state, thread or network change.
 make sure no text is cut off").
 
 **Phases skipped.** ADR, Secure, Comply, Launch (layout only; public tier). Not reviewed by a
-second agent. Not built or installed yet.
+second agent. Installed as v2.263 (2026-11-20).
 
 ## Verify log (2026-11-20)
 Full suite green (one mode). Offscreen render checked by eye: four mixed tiles, equal size, all
-text visible. Not checked in the installed app.
+text visible. Not checked on the Storage page of the installed app.
