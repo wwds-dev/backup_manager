@@ -104,7 +104,18 @@
 - [ ] `P3` `bug` `@ai` Lab Health: the Envs header tooltip is built before the saved thresholds are loaded, and neither it nor the hint under the day boxes is refreshed after a change, so both can quote the wrong day counts (`LabHealthCard.__init__` in `main.py`; the summary line and Idle tooltip are fine)
 - [ ] `P3` `bug` `@ai` Lab Health: the **🗂 Other caches…** button tooltip says "Nothing is deleted from here", but its dialog's **🧹 Clean checked** does delete the ticked caches; reword the tooltip
 - [ ] `P3` `docs` `@ai` **Fill the placeholder in `docs/foundry/app-context.md:77`** (Invariants): the template line `<things agents must never do or imply, …>` is still there, so the session-start hook warns "1 unfilled placeholder". Replace it with the app's real invariants (e.g. the "OK" wording, delete-only-with-confirm and no-other-worktree rules from Product) or delete it. Found 2026-11-20.
-- [ ] `P3` `testing` `@ai` **Review, Verify and Release pass for the iCloud card fix** (spec `docs/specs/icloud-unavailable.md`, merge `5bba361`, installed as v2.166 on 2026-11-20): `du` errors "Resource deadlock avoided" (cloud-only items) now keep the total exact. Built and checked via `icloud_du.log` (`not_downloaded=2 other_errors=0`), but no code-reviewer pass, no QA verify and no release check yet; also screenshot the card. New chat, Sonnet medium, ~5–10 min.
+- [x] `P3` `testing` `@ai` **Review, Verify and Release pass for the iCloud card fix** (spec `docs/specs/icloud-unavailable.md`, merge `5bba361`, v2.166). Done 2026-11-20:
+  - Review: `docs/audit/icloud-unavailable-review.md`, no P0/P1, 4 P3.
+  - Verify: PASS. 373 tests, 0 failures (exit 139 at the end is the known segfault); 7 of 8 mutants killed; the card text was rendered offscreen as "16.0 MB local cache".
+  - Release check: clear in the main checkout.
+  - Not done: the on-screen screenshot (the window is on another Space).
+- [ ] `P2` `testing` `@ai` **iCloud log follow-ups from the review**
+  - Assert `not_downloaded=1 other_errors=1` in `test_icloud_bytes_mixed_errors_stay_partial` (QA G1, mutant M4).
+  - Add a test where stderr is `Resource deadlock avoided extra` and expect PartialBytes.
+  - Log only the number from `du`'s output and only `du: ` error lines (the path and, on timeout, the command line leak today).
+  - Reword the comment: only dataless *directories* fail.
+  - See `docs/audit/icloud-unavailable-review.md`.
+- [ ] `P2` `testing` `@ai` **`tests/test_quota_off_ui_thread.py` overwrites the live `icloud_du.log`** with a real `du` run, probably an iCloud tile worker that outlives the test's `SECRETS_DIR` patch. This breaks the test bar (spec `quota-off-ui-thread`). Also: the suite's exit-139 segfault (`TODO.md:26`) comes from `tests/test_workspace_dialog.py` alone.
 
 ## v3 — blocked or deferred
 

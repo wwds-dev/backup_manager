@@ -63,3 +63,54 @@ the EDEADLK-means-dataless reading against Apple documentation (based on known
 Verified 2026-11-20 17:32 on the installed v2.166 (restarted): `icloud_du.log` reads
 `rc=1 out='16428…' not_downloaded=2 other_errors=0 err=''`, so the card shows the exact
 total ("16.0 MB local cache"). The card text itself was not screenshotted.
+
+## Review and Verify log (2026-11-20, independent pass on 029fc93 / v2.166)
+Review: `docs/audit/icloud-unavailable-review.md` (`code-reviewer` agent, read-only). No P0 or P1.
+P3 items:
+- The log still holds the home path in `out=` and the command line on timeout, so "no paths" is
+  not true.
+- The comment says cloud-only *items* fail with EDEADLK; only *directories* do.
+- A substring-match mutant survives the tests.
+- Review ran after merge and install.
+
+The EDEADLK-means-dataless reading was judged sound (du only `lstat`s files; only dataless
+directories fail). It is still not checked against Apple documentation.
+
+Verify (`qa-engineer` agent): **PASS.**
+- Success measure shown through the real `_apply_size` (offscreen Qt, faked du rc=1,
+  `16428`):
+  - dataless-only → "16.0 MB local cache", log `not_downloaded=1 other_errors=0`
+  - mixed → "at least 16.0 MB (some folders unreadable)"
+- Full suite, `.venv/bin/python -m pytest -q`, 5 runs: 373 tests, 0 failures, 0 errors, 1 skipped
+  (`test_appkit_guard.py`, no lab_hub beside the worktree), about 27 s.
+  - Every run exits 139 (a segfault at exit after all tests pass). This is the known P2
+    (`TODO.md:26`). It also happens at `029fc93^` and comes from `tests/test_workspace_dialog.py`
+    alone.
+- Mutations: 8 planted, 7 killed. Survivor M4: `not_downloaded={len(errors)}` (the mixed test
+  does not assert the `not_downloaded` count). `main.py` was restored after each mutant.
+- Gaps:
+  - G1 (P2): assert `not_downloaded=1 other_errors=1` in `test_icloud_bytes_mixed_errors_stay_partial`.
+  - G3 (P3): no single test asserts the exact text "16.0 MB local cache".
+  - G4 (P3): no test for a non-English error message; a translated message would fall back to
+    "at least", the safe direction.
+
+Test isolation leak (found by the orchestrator, outside this spec):
+- `tests/test_quota_off_ui_thread.py` overwrites the live
+  `~/Library/Application Support/Backup Control Center/icloud_du.log` with a real `du` result
+  ("Operation not permitted": the shell has no Full Disk Access). Each test file was run alone and
+  the log's mtime checked; only this file changed it (19:00:46).
+- Likely cause: an iCloud tile worker runs a real `du` after the test's `SECRETS_DIR` patch is
+  undone.
+- Older-format worktrees did the same at 18:48.
+- This breaks the test bar and destroys the 17:32 log evidence above. It belongs to spec
+  `quota-off-ui-thread`.
+
+Screenshot: not taken. The app window (v2.166, pid 96488) is on another Space and the current
+Space is full-screen, so background capture returned no image. Card text on screen is not
+verified; the 17:32 log and the offscreen render above stand in for it.
+
+Release check (`python3 docs/foundry/tooling/release_check.py .`):
+- In this worktree: BLOCKED, because `docs/legal` is a link to the Foundry HQ that is not present in a
+  worktree.
+- In the main checkout at the same commit `ae66b37`: "legal gate clear (tier public) … clear:
+  Release may start", rc 0.

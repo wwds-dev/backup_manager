@@ -55,3 +55,7 @@
 {"ts": "2026-11-20T14:34:30", "phase": "define", "state": "done", "spec": "tile-used-wording"}
 {"ts": "2026-11-20T14:34:30", "phase": "build", "state": "start", "spec": "tile-used-wording"}
 {"ts": "2026-11-20T14:54:50", "phase": "build", "state": "done", "spec": "icloud-unavailable"}
+{"ts": "2026-11-20T18:48:38", "phase": "review", "state": "start", "spec": "icloud-unavailable"}
+{"ts": "2026-11-20T18:48:38", "phase": "verify", "state": "start", "spec": "icloud-unavailable"}
+{"ts": "2026-11-20T18:50:44", "phase": "review", "state": "done", "spec": "icloud-unavailable"}
+{"ts": "2026-11-20T19:01:15", "phase": "verify", "state": "done", "spec": "icloud-unavailable"}
