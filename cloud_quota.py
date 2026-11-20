@@ -1,9 +1,10 @@
 """
-Real cloud-account storage quota (used/total) for Google Drive and Dropbox,
-via each provider's OAuth API — distinct from local filesystem free space.
+Real cloud-account storage quota (used/total) for Google Drive, Dropbox and
+OneDrive, via each provider's OAuth API — distinct from local filesystem free space.
 
-Proton Drive and iCloud have no public API, so they aren't covered here; their
-tiles in the app fall back to local disk free space.
+Proton Drive and iCloud have no public quota API, so they have no quota call here
+(registry entries with has_quota=False): Proton shows a link-only tile, iCloud its
+local `du` figure.
 
 One-time setup required from the user (can't be done on their behalf):
   Google  - console.cloud.google.com -> new project -> enable "Google Drive API"
@@ -19,7 +20,7 @@ One-time setup required from the user (can't be done on their behalf):
             -> Settings tab -> Redirect URIs -> add http://localhost:53789/
 
 Then, in the app's Cloud Accounts dialog, paste those values in and click
-Connect for each Google Drive / Dropbox mount — a browser window opens for you
+Connect for each Google Drive / Dropbox / OneDrive mount — a browser window opens for you
 to sign in and approve access for that specific account.
 """
 

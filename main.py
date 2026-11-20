@@ -2423,7 +2423,7 @@ class CloudAccountsDialog(QDialog):
 
 
 class AddAccountDialog(QDialog):
-    """Add a Google Drive / Dropbox account to monitor, with no local mount required."""
+    """Add a Google Drive / Dropbox / OneDrive account to monitor, with no local mount required."""
 
     def __init__(self, parent=None, on_change=None):
         super().__init__(parent)
