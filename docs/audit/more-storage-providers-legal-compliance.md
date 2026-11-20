@@ -293,3 +293,36 @@ wants it before sign-off, run `/radar-check comply` from the main checkout.
 3. Resolve or accept the name trigger (GoodSync); fill the real name and reason in the sign-off record (P3-6).
 4. Sign yourself (I did not run it), after the above:
    `python3 docs/foundry/tooling/legal_gate.py sign . --by "<your name>" --role owner --scope "more-storage-providers" --accept-risk "<why the name risk is accepted>"`
+
+## 12. Refresh against `main` at d117d4f: sections 3 and 8, release prerequisites (2026-11-20)
+Requested by the owner via the Re-verify session. `d117d4f` contains the draft (`90a216d`) and nothing
+else new in code. Still a DRAFT; nothing signed, approved or "compliant".
+
+**Section 3 (README edits), now on `main`:**
+| Item | Status | Evidence |
+|---|---|---|
+| Privacy section | Done | `README.md:780-797`; commit `d5a1505`; revoke links Google, Dropbox, Microsoft `:792-793` (`b37def6`) |
+| Not affiliated / use at own risk | Done | `README.md:799-806`; `d5a1505` |
+| Proton wording (C18) | Done | `README.md:69,468`; UI string `cloud_quota.py:643`; `3c3a745` |
+| Edit 2: port statement no longer "unverified" | Done | `README.md:136-138` cites Microsoft's Entra page, read 2026-11-20 |
+| Edit 3: `Files.Read` dated cite | Done | `README.md:145-147` |
+| Edit 4: Google 7-day Testing note | Done | `README.md:119-121` (says "not checked with a live account") |
+| Entra display name ("any name you like") | **Open** | `README.md:135` still says name it "Backup Control Center" |
+
+**Section 8 (owner items):**
+1. README additions: published (above). The network trace behind "nothing is sent" is **still open**:
+   `README.md:795-797` itself says it has not been measured. Company names (Proton AG, Dropbox, Inc.): not verified.
+2. Name trigger (GoodSync): **open**, the single `- [ ] LAWYER:` line in `register.md`; `name.md` table unfilled.
+3. Provider-term points: (a) closed in text; (b)-(c) open (Microsoft reporting line in `SECURITY.md`:
+   no hit for "Microsoft"/"MSRC"; `disconnect()` still local-only, `cloud_quota.py:207-213`).
+
+**`register.md` "Release prerequisites" (HQ pack, edited in this pass; not committed here):**
+- 0 README edits: done (above). 1 LICENSE: done, MIT (`LICENSE:1`, `0990747`); `SECURITY.md:3` now says "MIT licence".
+- 2 `SECURITY.md` Keychain wording: done, `SECURITY.md:3` describes the 0600 file and 0700 folder (`0990747`, `de344f5`).
+- 3 name table, 4 network trace, 5 binary items: open, unchanged.
+`release_check.py .` run in the main checkout (where the HQ pack link exists), fake HOME, after the register edit:
+```
+release check: BLOCKED: legal gate: legal pack changed since the last sign-off (<name>, 2026-11-18)
+release check: BLOCKED: do not build or publish
+```
+Run inside this worktree it says the pack is not present (git-ignored link). Blocked until a person signs.
