@@ -293,3 +293,11 @@ Left untouched as instructed (to TODO): Secure P3-3 (disconnect can block the UI
 P3-6 (quota history written 0644, non-atomic); P3-7 needs no change. Review P3-2 (stale copy) and P3-3
 (double history read) also stay open. Not verified: Google's acceptance of PKCE for the Desktop client
 type (no live sign-in).
+
+## Verify-gap fix log (2026-11-20, Build follow-up for the second Verify pass at 2084ec2)
+Test-first, loopback sockets only, no provider call.
+- **G1** `test_listener_binds_loopback_only`: mutant `("0.0.0.0", port)` at the bind line FAILS it (restored).
+- **G2** `test_silent_connection_is_closed_after_the_handler_timeout` (timeout patched to 0.3 s): mutants `timeout = None` and `timeout = 600` both FAIL it (restored).
+- **S1** `_redirect_code` compares `.encode()` bytes, so a non-ASCII `state` is rejected with the normal "state check failed" message; `test_non_ascii_state_is_rejected_cleanly` failed with TypeError before the fix, passes after.
+- **S6** `tests/conftest.py` autouse fixture points `SECRETS_DIR`, `CREDENTIALS_FILE`, `TOKENS_FILE`, `MANUAL_ACCOUNTS_FILE` at tmp_path for every test; per-test patches still override it.
+- Suite: 507 tests, 0 failures, 0 errors, 1 skipped (503 + 4 new); exit 139 is the known Qt teardown crash. Verify should re-run.
