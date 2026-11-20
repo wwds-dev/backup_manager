@@ -1,6 +1,6 @@
 # Spec: lab-root checks (what is left of Folder Audit) in the Workspace section
 
-Status: **Define draft 2026-11-20, awaiting the owner's Define gate.** Nothing is built. Requested by the
+Status: **Define approved by the owner 2026-11-20** ("Approve, report-only", recorded in `approvals.jsonl`; this settles open question 2 as report-only; questions 1, 3 and 4 stay as proposed: separate monthly review, keep R5, a table in Workspace). Nothing is built; build waits for the owner's go. Requested by the
 owner 2026-11-20 ("merge whatever is useful of Folder Audit into Backup Control Center"; he chose "draft
 spec for app rows"). Tier `public`. Builds on `docs/specs/workspace-cleanup.md` section 3, which split the
 work: `folder_audit.py` keeps what sits at the lab root by name, the app takes what is measured. This spec
