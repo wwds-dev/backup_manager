@@ -280,6 +280,8 @@ def google_connect(account_key):
     if not creds or not creds.get("client_id"):
         return False, "No Google Client ID / Secret saved yet."
 
+    verifier, challenge = _pkce_pair()
+    state = secrets.token_urlsafe(32)
     params = {
         "client_id": creds["client_id"],
         "redirect_uri": REDIRECT_URI,
@@ -287,12 +289,14 @@ def google_connect(account_key):
         "scope": GOOGLE_SCOPE,
         "access_type": "offline",
         "prompt": "consent",
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+        "state": state,
     }
     webbrowser.open(f"{GOOGLE_AUTH_URL}?{urllib.parse.urlencode(params)}")
-    result = _wait_for_redirect(REDIRECT_PORT)
-    code = result.get("code", [None])[0]
-    if not code:
-        return False, "No authorization code received (timed out or denied)."
+    code, error = _redirect_code(_wait_for_redirect(REDIRECT_PORT), state)
+    if error:
+        return False, error
 
     resp = requests.post(GOOGLE_TOKEN_URL, data={
         "code": code,
@@ -300,6 +304,7 @@ def google_connect(account_key):
         "client_secret": creds["client_secret"],
         "redirect_uri": REDIRECT_URI,
         "grant_type": "authorization_code",
+        "code_verifier": verifier,
     }, timeout=20)
     if resp.status_code != 200:
         return False, f"Token exchange failed: {resp.text[:200]}"
@@ -362,6 +367,7 @@ def dropbox_connect(account_key):
         return False, "No Dropbox App Key / Secret saved yet."
 
     verifier, challenge = _pkce_pair()
+    state = secrets.token_urlsafe(32)
     params = {
         "client_id": creds["app_key"],
         "redirect_uri": REDIRECT_URI,
@@ -370,12 +376,12 @@ def dropbox_connect(account_key):
         "scope": DROPBOX_SCOPE,
         "code_challenge": challenge,
         "code_challenge_method": "S256",
+        "state": state,
     }
     webbrowser.open(f"{DROPBOX_AUTH_URL}?{urllib.parse.urlencode(params)}")
-    result = _wait_for_redirect(REDIRECT_PORT)
-    code = result.get("code", [None])[0]
-    if not code:
-        return False, "No authorization code received (timed out or denied)."
+    code, error = _redirect_code(_wait_for_redirect(REDIRECT_PORT), state)
+    if error:
+        return False, error
 
     resp = requests.post(DROPBOX_TOKEN_URL, data={
         "code": code,
