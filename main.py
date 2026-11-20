@@ -1230,9 +1230,10 @@ _QUOTA_HISTORY_MAX = 60  # samples per account key
 def _load_quota_history() -> dict:
     if _QUOTA_HISTORY_FILE.exists():
         try:
-            return json.loads(_QUOTA_HISTORY_FILE.read_text())
+            data = json.loads(_QUOTA_HISTORY_FILE.read_text())
         except (ValueError, OSError):
             return {}
+        return data if isinstance(data, dict) else {}
     return {}
 
 
@@ -1251,6 +1252,32 @@ def _append_quota_sample(account_key: str, used: int, total: int) -> None:
 
 def _get_quota_history(account_key: str) -> list:
     return _load_quota_history().get(account_key, [])
+
+
+def _last_known_quota(account_key: str):
+    """(used, total, ts) of the newest usable history sample, or None."""
+    samples = _get_quota_history(account_key)
+    if not isinstance(samples, list):
+        return None
+    for sample in reversed(samples):
+        try:
+            used, total, ts = int(sample["used"]), int(sample["total"]), sample["ts"]
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        if total > 0 and used >= 0:
+            return used, total, ts
+    return None
+
+
+def _format_as_of(ts: str, now: datetime) -> str:
+    """Time only when the sample is from today, else date and time."""
+    try:
+        when = datetime.fromisoformat(ts)
+    except (TypeError, ValueError):
+        return "earlier"
+    if when.date() == now.date():
+        return when.strftime("%H:%M")
+    return when.strftime("%-d %b %H:%M")
 
 
 # ----------------------------------------------------------------------------
@@ -1696,13 +1723,21 @@ class StorageTile(QFrame):
                 self.detail_lbl.setText("")
                 self.reconnect_btn.setVisible(True)
                 return
-            self.detail_lbl.setText(
-                "Account quota unavailable" if self.quota_only
-                else "Account quota unavailable — showing local disk:"
-            )
-            if self.quota_only:
+            # Any other failure (network, timeout, rate limit): never show the
+            # Mac disk's numbers for a connected account. Last known sample or
+            # "unavailable".
+            last = _last_known_quota(self.account_key)
+            if last is None:
                 self.bar.setValue(0)
+                self.detail_lbl.setText("Account quota unavailable")
                 return
+            used, total, ts = last
+            self._set_bar(int(used / total * 100))
+            self.detail_lbl.setText(
+                f"{human_size(used)} used of {human_size(total)}  "
+                f"(account quota, as of {_format_as_of(ts, datetime.now())})"
+            )
+            return
 
         if self.quota_only:
             self.bar.setValue(0)
@@ -5038,6 +5073,8 @@ class OverviewPage(QWidget):
                     acct = (getattr(t, "account_lbl", None) and t.account_lbl.text()) \
                         or getattr(t, "account_key", "")
                     detail = f"{detail} · {acct} (fullest of {len(tiles)})"
+                    if len(known) < len(tiles):
+                        detail += f" · {len(tiles) - len(known)} unavailable"
             except RuntimeError:  # tile deleted by a refresh mid-read
                 continue
             if key == "icloud":

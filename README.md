@@ -61,7 +61,10 @@ Local Disk, Google Drive, Dropbox, and iCloud Drive tiles — each with a fill b
 connected via OAuth; iCloud shows local cache size only (Apple publishes no quota API).
 Unmounted drives are hidden. Duplicate CloudStorage mounts for the same account are
 deduplicated. Tiles auto-refresh every 5 minutes **and** immediately when the Mac
-reconnects to the network.
+reconnects to the network. If a connected account's quota cannot be read (network,
+timeout, rate limit), its tile shows the last known value marked "as of <time>", or
+"Account quota unavailable" — never the Mac disk's numbers. Tiles of accounts that are not
+connected yet show local disk space, labelled "(local disk)".
 
 - **☁ Cloud accounts…** — enter a Google OAuth Client ID/Secret or Dropbox App
   Key/Secret once; Connect each mount to show real used/total quota. Expired tokens
