@@ -304,3 +304,33 @@ def test_failed_replace_leaves_the_old_file(fresh_dir, monkeypatch, which):
         write()
     assert json.loads(path().read_text()) == {"old": True}
     assert [p.name for p in fresh_dir.iterdir()] == [path().name]  # no temp file left
+
+
+# ---------------------------------------------------------------------------- P3-1 error text
+@pytest.mark.parametrize("provider", ["google", "dropbox"])
+def test_token_exchange_error_shows_the_error_code_only(monkeypatch, provider):
+    body = {"error": "invalid_grant",
+            "error_description": "Bad code the-auth-code for secret gsecret dsecret"}
+    (ok, err), _ = _connect(monkeypatch, provider, token_resp=Resp(400, body))
+    assert not ok
+    assert "invalid_grant" in err and "400" in err
+    for leaked in ("the-auth-code", "gsecret", "dsecret", "Bad code", "error_description"):
+        assert leaked not in err
+
+
+@pytest.mark.parametrize("provider", ["google", "dropbox"])
+def test_token_exchange_error_with_a_non_json_body(monkeypatch, provider):
+    class HtmlResp(Resp):
+        def json(self):
+            raise ValueError("not json")
+    resp = HtmlResp(502, {})
+    resp.text = "<html>upstream the-auth-code</html>"
+    (ok, err), _ = _connect(monkeypatch, provider, token_resp=resp)
+    assert not ok and "502" in err and "the-auth-code" not in err and "html" not in err
+
+
+@pytest.mark.parametrize("body", [["a", "list"], {"error": "x" * 500}, {"error": "bad code: the-auth-code"},
+                                  {"error": {"nested": "the-auth-code"}}])
+def test_error_text_ignores_odd_error_fields(body):
+    text = cloud_quota._oauth_error_text(Resp(400, body))
+    assert text == "HTTP 400"

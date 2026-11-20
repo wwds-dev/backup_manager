@@ -328,7 +328,7 @@ def google_connect(account_key):
         "code_verifier": verifier,
     }, timeout=20)
     if resp.status_code != 200:
-        return False, f"Token exchange failed: {resp.text[:200]}"
+        return False, f"Token exchange failed: {_oauth_error_text(resp)}"
     data = resp.json()
     refresh_token = data.get("refresh_token")
     if not refresh_token:
@@ -413,7 +413,7 @@ def dropbox_connect(account_key):
         "code_verifier": verifier,
     }, timeout=20)
     if resp.status_code != 200:
-        return False, f"Token exchange failed: {resp.text[:200]}"
+        return False, f"Token exchange failed: {_oauth_error_text(resp)}"
     data = resp.json()
     refresh_token = data.get("refresh_token")
     if not refresh_token:
@@ -503,9 +503,11 @@ def _oauth_error_text(resp):
     the authorization code or a token)."""
     try:
         err = resp.json().get("error")
-    except ValueError:
+    except (ValueError, AttributeError):  # not JSON, or JSON that is not an object
         err = None
-    return f"HTTP {resp.status_code}" + (f" ({err})" if isinstance(err, str) else "")
+    # OAuth error codes are short ASCII words (invalid_grant); anything else is not shown.
+    ok = isinstance(err, str) and re.fullmatch(r"[A-Za-z0-9_.\-]{1,64}", err)
+    return f"HTTP {resp.status_code}" + (f" ({err})" if ok else "")
 
 
 def onedrive_connect(account_key):
