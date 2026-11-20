@@ -342,3 +342,23 @@ def test_icloud_bytes_none_when_du_prints_nothing(monkeypatch, tmp_path):
 def test_icloud_log_failure_never_breaks_measuring(monkeypatch, tmp_path):
     _fake_du(monkeypatch, tmp_path / "no" / "such", 0, "5\t/x\n", "")
     assert main.icloud_local_bytes() == 5 * 1024
+
+
+# --- storage tiles say "used of" everywhere (spec tile-used-wording) ---
+
+def _local_tile(monkeypatch, provider=None):
+    from collections import namedtuple
+    U = namedtuple("U", "total used free")
+    monkeypatch.setattr(main, "disk_usage_for", lambda p: U(1000 * 10**9, 600 * 10**9, 400 * 10**9))
+    monkeypatch.setattr(main.cloud_quota, "is_connected", lambda k: False)
+    t = main.StorageTile("Local Disk", main.HOME, True, provider_override=provider)
+    return t
+
+
+def test_local_disk_tile_says_used_of_and_free_in_tooltip(qapp, monkeypatch):
+    t = _local_tile(monkeypatch)
+    text = t.detail_lbl.text()
+    assert "used of" in text and "free" not in text
+    assert text.startswith(main.human_size(600 * 10**9) + " used of"), text
+    assert "free" in t.detail_lbl.toolTip()
+    assert t.bar.value() == 60

@@ -1791,8 +1791,9 @@ class StorageTile(QFrame):
         self._set_bar(pct_used)
         suffix = "  (local disk)" if self.provider else ""
         self.detail_lbl.setText(
-            f"{human_size(usage.free)} free of {human_size(usage.total)}{suffix}"
+            f"{human_size(usage.used)} used of {human_size(usage.total)}{suffix}"
         )
+        self.detail_lbl.setToolTip(f"{human_size(usage.free)} free")
 
     def _show_last_known(self, placeholder):
         """Last known account sample "as of <time>", else `placeholder`. No network."""
