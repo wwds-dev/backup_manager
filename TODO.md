@@ -103,6 +103,8 @@
 - [ ] `P3` `docs` `@ai` Add a CHANGELOG: the AGENTS.md definition of done requires one and the repo has none
 - [ ] `P3` `bug` `@ai` Lab Health: the Envs header tooltip is built before the saved thresholds are loaded, and neither it nor the hint under the day boxes is refreshed after a change, so both can quote the wrong day counts (`LabHealthCard.__init__` in `main.py`; the summary line and Idle tooltip are fine)
 - [ ] `P3` `bug` `@ai` Lab Health: the **🗂 Other caches…** button tooltip says "Nothing is deleted from here", but its dialog's **🧹 Clean checked** does delete the ticked caches; reword the tooltip
+- [ ] `P2` `security` `@ai` **Secure pass for more storage providers** (spec `docs/specs/more-storage-providers.md`, branch `claude/wizardly-payne-caa30e` at `54c3907`, after Verify): OneDrive OAuth (PKCE, state check, error text), refresh-token rotation and the atomic 0600 `tokens.json` write under the locks, Graph and Google quota calls, the registry's web links (`?authuser=`). Also take the review P3s deferred to Secure: stale copy, double history read, redirect GET, Google/Dropbox `state` (fix log in the spec). Required (network, secrets, file writes). New chat, Opus high, ~20–40 min.
+- [ ] `P3` `docs` `@ai` **Document pass for more storage providers** (same spec and branch, after Secure): README (OneDrive and Proton tiles, the Google "Drive files / Photos, Gmail and other" split, OneDrive app registration in Cloud Accounts), CHANGELOG entry, version per the versioning doc. New chat, Sonnet medium, ~10–15 min.
 
 ## v3 — blocked or deferred
 
