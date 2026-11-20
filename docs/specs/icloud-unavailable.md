@@ -1,0 +1,38 @@
+# iCloud card: say why it is unavailable
+
+**Problem.** On 2026-11-20 the Overview iCloud card (v2.137 and v2.141) showed "—" with
+"Unavailable". Cause, measured: macOS denies reading `~/Library/Mobile Documents`
+(`du -sk` prints "Operation not permitted", exit 1, instantly; `ls` fails the same), so
+`icloud_local_bytes()` returns `None` and the tile writes "Unavailable". The text hides a
+fixable cause: the app needs Full Disk Access.
+
+**User.** The owner, reading Overview and the storage tiles.
+
+**Success measure.** When reading the iCloud folder is denied (PermissionError), the tile
+and the Overview gauge detail read "No access: allow Full Disk Access" instead of
+"Unavailable"; any other failure still reads "Unavailable"; a successful `du` is unchanged.
+Tests cover denied, other failure and success, and are mutation-checked.
+
+**Non-goals.** Granting the permission, opening System Settings, any change to the size
+measurement, the bar, the last-known-value logic or other tiles.
+
+**Design.** Detail text only. No new widget.
+
+**Architecture.** One Qt-free helper `icloud_access_denied()` in `main.py` (an `os.listdir`
+of the folder, True only on PermissionError). The tile worker calls it only when
+`icloud_local_bytes()` returned `None` and emits a `DENIED` marker; `_apply_size` maps it to
+the text. No new state, network, or writes.
+
+**Approval.** Define: owner chose "Clear message" on 2026-11-20.
+
+**Phases skipped.** ADR (no state, concurrency or boundary change), Secure (no new network,
+secret, auth or input), Comply and Launch (public tier, no claim or data-flow change).
+
+## Verify log (2026-11-20)
+- Measured: `du -sk ~/Library/"Mobile Documents"` → "Operation not permitted", rc 1; `ls` same.
+- Text is "No access (Full Disk Access)" (shorter than first drafted: tile is 230 px wide).
+- Tests in `tests/test_main_window.py`; 3 mutations caught (PermissionError check, `size is None`
+  guard, text mapping). Full suite green. Reviewer: no P0/P1; P2 gauge and worker tests added.
+- Known limit (reviewer P2): a stale last-known gauge value hides a denial that begins mid-session.
+- Not verified: the installed app really lacks Full Disk Access (only my shell was measured), and
+  that the text fits the tile on screen.

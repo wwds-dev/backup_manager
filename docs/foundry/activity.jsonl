@@ -41,3 +41,5 @@
 {"ts": "2026-11-20T13:42:27", "phase": "architect", "state": "done", "spec": "quota-off-ui-thread"}
 {"ts": "2026-11-20T13:42:27", "phase": "build", "state": "start", "spec": "quota-off-ui-thread"}
 {"ts": "2026-11-20T13:45:55", "phase": "build", "state": "done", "spec": "quota-off-ui-thread"}
+{"ts": "2026-11-20T14:15:23", "phase": "build", "state": "start", "spec": "icloud-unavailable"}
+{"ts": "2026-11-20T14:20:48", "phase": "build", "state": "done", "spec": "icloud-unavailable"}
