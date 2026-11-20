@@ -68,3 +68,5 @@
 {"ts": "2026-11-20T18:48:38", "phase": "verify", "state": "start", "spec": "icloud-unavailable"}
 {"ts": "2026-11-20T18:50:44", "phase": "review", "state": "done", "spec": "icloud-unavailable"}
 {"ts": "2026-11-20T19:01:15", "phase": "verify", "state": "done", "spec": "icloud-unavailable"}
+{"ts": "2026-11-20T18:47:17", "phase": "secure", "state": "start", "spec": "more-storage-providers"}
+{"ts": "2026-11-20T18:50:06", "phase": "secure", "state": "done", "spec": "more-storage-providers"}
