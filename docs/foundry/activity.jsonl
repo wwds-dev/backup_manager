@@ -31,3 +31,7 @@
 {"ts": "2026-11-20T00:14:52", "phase": "build", "state": "done", "spec": "folder-backup-secret-filter"}
 {"ts": "2026-11-20T00:14:58", "phase": "secure", "state": "start", "spec": "folder-backup-secret-filter"}
 {"ts": "2026-11-20T00:20:09", "phase": "secure", "state": "done", "spec": "folder-backup-secret-filter"}
+{"ts": "2026-11-20T13:27:02", "phase": "define", "state": "start", "spec": "quota-fallback-last-known"}
+{"ts": "2026-11-20T13:27:17", "phase": "define", "state": "done", "spec": "quota-fallback-last-known"}
+{"ts": "2026-11-20T13:27:18", "phase": "build", "state": "start", "spec": "quota-fallback-last-known"}
+{"ts": "2026-11-20T13:33:41", "phase": "build", "state": "done", "spec": "quota-fallback-last-known"}
