@@ -12,6 +12,7 @@
 
 - [ ] `P0` `security` `@me` **Rotate every key that sat in plaintext on Google Drive.** Names only, from `sentinel/.env`, `imprint/vidforge/.env` and Imprint's and Sentinel's app data (the values were never read into any file or log): `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `DEEPSEEK_API_KEY`, `KIMI_API_KEY`, `DASHSCOPE_API_KEY`, `HIBP_API_KEY`, `VIRUSTOTAL_API_KEY`, `IPINFO_API_KEY`, `ABUSEIPDB_API_KEY`. Rotate at each provider, then update `sentinel/.env`, `imprint/vidforge/.env` and the apps' Settings. (`imprint/.env` holds only two Higgsfield endpoint URLs, not keys.)
 - [ ] `P0` `security` `@me` **Sign `opaque1337@proton.me` in to the Proton Drive app**, so `backup_secrets.sh` finds its folder (it refuses the other two accounts).
+- [ ] `P2` `infra` `@me` Merge or drop `claude/brave-hellman-c8187a` (one commit, `88adaf7` "Workspace slice 2: log real Trash removal check, release done", pushed 2026-11-18, found unmerged 2026-11-20).
 - [ ] `P1` `security` `@me` **Purge the old plaintext copies:** in Terminal, `~/Documents/lab/_Admin/backup/purge_plaintext_secrets.sh` (lists), then `--apply`, then empty the Trash at drive.google.com.
 
 ## v2 — current
