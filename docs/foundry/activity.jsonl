@@ -49,3 +49,5 @@
 {"ts": "2026-11-20T14:19:47", "phase": "build", "state": "done", "spec": "lab-root-checks"}
 {"ts": "2026-11-20T14:15:23", "phase": "build", "state": "start", "spec": "icloud-unavailable"}
 {"ts": "2026-11-20T14:20:48", "phase": "build", "state": "done", "spec": "icloud-unavailable"}
+{"ts": "2026-11-20T14:25:43", "phase": "release", "state": "start", "spec": "lab-root-checks"}
+{"ts": "2026-11-20T14:26:21", "phase": "release", "state": "done", "spec": "lab-root-checks"}
