@@ -55,3 +55,12 @@
 {"ts": "2026-11-20T14:34:30", "phase": "define", "state": "done", "spec": "tile-used-wording"}
 {"ts": "2026-11-20T14:34:30", "phase": "build", "state": "start", "spec": "tile-used-wording"}
 {"ts": "2026-11-20T14:54:50", "phase": "build", "state": "done", "spec": "icloud-unavailable"}
+{"ts": "2026-11-20T14:42:54", "phase": "build", "state": "start", "spec": "more-storage-providers"}
+{"ts": "2026-11-20T14:39:00", "phase": "define", "state": "start", "spec": "more-storage-providers"}
+{"ts": "2026-11-20T14:39:28", "phase": "define", "state": "done", "spec": "more-storage-providers"}
+{"ts": "2026-11-20T14:41:15", "phase": "architect", "state": "start", "spec": "more-storage-providers"}
+{"ts": "2026-11-20T14:41:38", "phase": "architect", "state": "done", "spec": "more-storage-providers"}
+{"ts": "2026-11-20T14:59:33", "phase": "build", "state": "done", "spec": "more-storage-providers"}
+{"ts": "2026-11-20T17:32:34", "phase": "build", "state": "start", "spec": "more-storage-providers"}
+{"ts": "2026-11-20T17:35:03", "phase": "build", "state": "done", "spec": "more-storage-providers"}
+{"ts": "2026-11-20T18:50:55", "phase": "document", "state": "done", "spec": "more-storage-providers"}

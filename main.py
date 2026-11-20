@@ -964,10 +964,10 @@ def icloud_access_denied() -> bool:
 
 
 def storage_targets():
-    """(name, path, exists) for Local Disk plus mounts that can show real account
-    quota (Google Drive, Dropbox). Proton Drive / iCloud Drive have no public quota
-    API, so showing them here would just repeat the Local Disk number — they're
-    left out rather than displayed as a misleading duplicate.
+    """(name, path, exists) for Local Disk plus mounts of a registry provider
+    (cloud_quota.PROVIDERS). Quota providers show the account quota; Proton Drive is a
+    link-only tile with no number (it never repeats the Local Disk figure). iCloud has
+    its own tile.
     Deduplicates by base account email — keeps the shortest (cleanest) folder name
     when Google Drive creates multiple mounts for the same account."""
     rows = [("Local Disk", HOME, True)]
@@ -995,6 +995,8 @@ def split_tile_name(name):
     if name.startswith("Dropbox"):
         account = name[len("Dropbox"):].strip()
         return "Dropbox", account
+    if name.startswith("OneDrive-"):
+        return "OneDrive", name[len("OneDrive-"):]
     return name, ""
 
 
@@ -1316,10 +1318,16 @@ def _load_quota_history() -> dict:
     return {}
 
 
-def _append_quota_sample(account_key: str, used: int, total: int) -> None:
+def _append_quota_sample(account_key: str, used: int, total: int,
+                         drive: int | None = None, trash: int | None = None) -> None:
     history = _load_quota_history()
     samples = history.get(account_key, [])
-    samples.append({"ts": datetime.now().isoformat(timespec="minutes"), "used": used, "total": total})
+    sample = {"ts": datetime.now().isoformat(timespec="minutes"), "used": used, "total": total}
+    if drive is not None:
+        sample["drive"] = drive
+    if trash is not None:
+        sample["trash"] = trash
+    samples.append(sample)
     samples = samples[-_QUOTA_HISTORY_MAX:]
     history[account_key] = samples
     try:
@@ -1333,8 +1341,8 @@ def _get_quota_history(account_key: str) -> list:
     return _load_quota_history().get(account_key, [])
 
 
-def _last_known_quota(account_key: str):
-    """(used, total, ts) of the newest usable history sample, or None."""
+def _newest_usable_sample(account_key: str):
+    """(used, total, ts, sample) of the newest usable history sample, or None."""
     samples = _get_quota_history(account_key)
     if not isinstance(samples, list):
         return None
@@ -1344,8 +1352,36 @@ def _last_known_quota(account_key: str):
         except (KeyError, TypeError, ValueError, OverflowError):
             continue
         if total > 0 and used >= 0:
-            return used, total, ts
+            return used, total, ts, sample
     return None
+
+
+def _last_known_quota(account_key: str):
+    """(used, total, ts) of the newest usable history sample, or None."""
+    found = _newest_usable_sample(account_key)
+    return found[:3] if found else None
+
+
+def _last_known_split(account_key: str):
+    """(drive, trash) stored with the same sample `_last_known_quota` returns, or None.
+
+    Samples written before the split existed have no `drive` key and give None.
+    """
+    found = _newest_usable_sample(account_key)
+    if not found:
+        return None
+    sample = found[3]
+
+    def as_int(key):
+        try:
+            return int(sample[key])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return None
+
+    drive = as_int("drive")
+    if drive is None:
+        return None
+    return drive, as_int("trash")
 
 
 def _format_as_of(ts: str, now: datetime) -> str:
@@ -1663,8 +1699,10 @@ class StorageTile(QFrame):
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(6)
 
+        self._reg = cloud_quota.PROVIDERS.get(self.provider) if self.provider else None
+        self.has_quota = self._reg.has_quota if self._reg else True
         if provider_override:
-            provider = "Google Drive" if provider_override == "google" else "Dropbox"
+            provider = self._reg.label if self._reg else provider_override
             account = display_account or ""
         else:
             provider, account = split_tile_name(name)
@@ -1704,13 +1742,39 @@ class StorageTile(QFrame):
         self.detail_lbl.setWordWrap(True)
         layout.addWidget(self.detail_lbl)
 
+        # Google only: "Drive files" and "Photos, Gmail and other" (a difference, see
+        # cloud_quota.drive_split). Hidden unless a valid split was read.
+        self.split_lbls = []
+        for _ in range(2):
+            lbl = QLabel()
+            lbl.setObjectName("TileFree")
+            lbl.setWordWrap(True)
+            layout.addWidget(lbl)
+            lbl.setVisible(False)
+            self.split_lbls.append(lbl)
+
+        # One quick-access link: the mounted folder, else the provider's registry URL.
+        # The URL is fixed here from the registry and the construction-time account
+        # name; nothing an API returns later can change it.
         if path is not None and exists:
             open_btn = link_button("Open in Finder →")
             open_btn.setStyleSheet(open_btn.styleSheet() + "font-size: 10px; padding: 2px 0;")
             open_btn.clicked.connect(lambda: run_cmd(["open", str(path)]))
             layout.addWidget(open_btn)
+        elif self._reg is not None:
+            url = cloud_quota.web_link(self.provider, account)
+            if url == self._reg.web_url:
+                text = f"Open {self._reg.label} provider page →"
+            else:
+                text = "Open this account in browser →"
+            open_btn = link_button(text)
+            open_btn.setToolTip(url)
+            open_btn.setStyleSheet(open_btn.styleSheet() + "font-size: 10px; padding: 2px 0;")
+            open_btn.clicked.connect(lambda _=False, u=url: run_cmd(["open", u]))
+            layout.addWidget(open_btn)
 
-        if self.provider and exists and not cloud_quota.is_connected(self.account_key):
+        if (self.provider and self.has_quota and exists
+                and not cloud_quota.is_connected(self.account_key)):
             connect_btn = link_button("Connect for account quota →")
             connect_btn.setStyleSheet(connect_btn.styleSheet() + "font-size: 10px; padding: 2px 0;")
             if on_connect_request:
@@ -1771,10 +1835,35 @@ class StorageTile(QFrame):
             f"QProgressBar::chunk {{ border-radius:4px; background:{color}; }}"
         )
 
+    def _set_split(self, used, drive, trash):
+        """Show the Drive / other lines when `drive_split` says the split is valid, else hide them."""
+        drive_files, other, trash = cloud_quota.drive_split(used, drive, trash)
+        files_lbl, other_lbl = self.split_lbls
+        if drive_files is None:
+            files_lbl.setVisible(False)
+            other_lbl.setVisible(False)
+            return
+        files_text = f"Drive files {human_size(drive_files)}"
+        if trash is not None:
+            files_text += f"  ·  trash {human_size(trash)}"
+        files_lbl.setText(files_text)
+        other_lbl.setText(f"Photos, Gmail and other {human_size(other)}")
+        other_lbl.setToolTip("Total minus Drive files; Google's API reports no separate figure "
+                             "within Photos, Gmail and other.")
+        files_lbl.setToolTip("Drive files as Google reports them; trash is shown, not subtracted.")
+        files_lbl.setVisible(True)
+        other_lbl.setVisible(True)
+
     def set_usage(self, path, exists):
         self.pct = None
+        self._set_split(0, None, None)
         self._quota_token += 1  # any fetch still in flight is now stale
         self._checking = False
+        if not self.has_quota:
+            # Link-only provider (Proton): no number, no bar, no local-disk figure.
+            self.bar.setVisible(False)
+            self.detail_lbl.setText(self._reg.no_quota_text or "No quota available")
+            return
         if not exists:
             self.bar.setValue(0)
             self.detail_lbl.setText("not mounted")
@@ -1819,6 +1908,9 @@ class StorageTile(QFrame):
             f"{human_size(used)} used of {human_size(total)}  "
             f"(account quota, as of {_format_as_of(ts, datetime.now())})"
         )
+        split = _last_known_split(self.account_key)
+        if split is not None:
+            self._set_split(used, *split)
 
     def _start_quota_fetch(self):
         """Fetch email and quota off the UI thread; the result lands in _apply_quota."""
@@ -1835,11 +1927,10 @@ class StorageTile(QFrame):
             email = None
             if cancel.is_set():
                 return token, None, None, "cancelled"
-            if provider == "dropbox":
-                try:
-                    email = cloud_quota.dropbox_account_email(key)
-                except Exception:
-                    email = None
+            try:
+                email = cloud_quota.account_email(provider, key)
+            except Exception:
+                email = None
             if cancel.is_set():
                 return token, email, None, "cancelled"
             try:
@@ -1886,17 +1977,24 @@ class StorageTile(QFrame):
             self.account_lbl.setVisible(True)
         if result is not None:
             used, total = result
+            drive = getattr(result, "drive", None)
+            trash = getattr(result, "trash", None)
+            self._set_split(used, drive, trash)
             if total:
                 self._set_bar(int(used / total * 100))
                 self.detail_lbl.setText(
                     f"{human_size(used)} used of {human_size(total)}  (account quota)"
                 )
-                _append_quota_sample(self.account_key, used, total)
+                _append_quota_sample(self.account_key, used, total, drive=drive, trash=trash)
                 self._refresh_sparkline()
-            else:
+            elif total is None:  # the provider omits the limit: unlimited plan
                 self.bar.setValue(0)
                 self.detail_lbl.setText(f"{human_size(used)} used  (unlimited plan)")
+            else:  # 0 or unusable: the provider gave no usable total, claim nothing
+                self.bar.setValue(0)
+                self.detail_lbl.setText(f"{human_size(used)} used  (total not reported)")
             return
+        self._set_split(0, None, None)
         # Token likely expired or revoked
         expired = quota_error and ("400" in quota_error or "401" in quota_error)
         if expired:
@@ -1958,9 +2056,15 @@ class ICloudTile(QFrame):
         note.setObjectName("TileAccount")
         layout.addWidget(note)
 
-        open_btn = link_button("Open in Finder →")
+        if ICLOUD_DIR.exists():
+            open_btn = link_button("Open in Finder →")
+            open_btn.clicked.connect(lambda _=False, d=str(ICLOUD_DIR): run_cmd(["open", d]))
+        else:
+            url = cloud_quota.web_link("icloud")
+            open_btn = link_button("Open iCloud Drive provider page →")
+            open_btn.setToolTip(url)
+            open_btn.clicked.connect(lambda _=False, u=url: run_cmd(["open", u]))
         open_btn.setStyleSheet(open_btn.styleSheet() + "font-size: 10px; padding: 2px 0;")
-        open_btn.clicked.connect(lambda: run_cmd(["open", str(ICLOUD_DIR)]))
         layout.addWidget(open_btn)
 
         self.pct = None
@@ -2192,24 +2296,24 @@ class CloudAccountsDialog(QDialog):
         self.resize(560, 460)
         layout = QVBoxLayout(self)
 
+        names = " / ".join(p.label for p in cloud_quota.quota_providers())
         layout.addWidget(QLabel(
-            "Connect Google Drive / Dropbox accounts to show their real storage\n"
+            f"Connect {names} accounts to show their real storage\n"
             "quota instead of local disk free space. Requires a one-time OAuth app\n"
-            "(see README) — paste its Client ID/Secret or App Key/Secret below."
+            "(see README) — paste its Client ID (and Secret or App Key/Secret where the provider has one; OneDrive has no secret) below."
         ))
 
         creds = cloud_quota.load_app_credentials()
         form = QFormLayout()
-        self.google_id = QLineEdit(creds.get("google", {}).get("client_id", ""))
-        self.google_secret = QLineEdit(creds.get("google", {}).get("client_secret", ""))
-        self.google_secret.setEchoMode(QLineEdit.Password)
-        self.dropbox_key = QLineEdit(creds.get("dropbox", {}).get("app_key", ""))
-        self.dropbox_secret = QLineEdit(creds.get("dropbox", {}).get("app_secret", ""))
-        self.dropbox_secret.setEchoMode(QLineEdit.Password)
-        form.addRow("Google Client ID:", self.google_id)
-        form.addRow("Google Client Secret:", self.google_secret)
-        form.addRow("Dropbox App Key:", self.dropbox_key)
-        form.addRow("Dropbox App Secret:", self.dropbox_secret)
+        # (provider key, credential field) -> QLineEdit, built from the registry
+        self.cred_edits = {}
+        for p in cloud_quota.PROVIDERS.values():
+            for field, label, secret in p.credential_fields:
+                edit = QLineEdit(creds.get(p.key, {}).get(field, ""))
+                if secret:
+                    edit.setEchoMode(QLineEdit.Password)
+                form.addRow(label, edit)
+                self.cred_edits[(p.key, field)] = edit
         layout.addLayout(form)
 
         save_btn = secondary_button("Save credentials")
@@ -2234,16 +2338,10 @@ class CloudAccountsDialog(QDialog):
         layout.addLayout(close_row)
 
     def save_credentials(self):
-        cloud_quota.save_app_credentials({
-            "google": {
-                "client_id": self.google_id.text().strip(),
-                "client_secret": self.google_secret.text().strip(),
-            },
-            "dropbox": {
-                "app_key": self.dropbox_key.text().strip(),
-                "app_secret": self.dropbox_secret.text().strip(),
-            },
-        })
+        creds = cloud_quota.load_app_credentials()
+        for (provider, field), edit in self.cred_edits.items():
+            creds.setdefault(provider, {})[field] = edit.text().strip()
+        cloud_quota.save_app_credentials(creds)
         self.status_lbl.setText("Saved.")
 
     def _add_row(self, label_text, name, provider, removable=False):
@@ -2281,8 +2379,8 @@ class CloudAccountsDialog(QDialog):
             if not exists:
                 continue
             p = cloud_quota.provider_for_name(name)
-            if not p:
-                continue
+            if not p or not cloud_quota.PROVIDERS[p].has_quota:
+                continue  # link-only providers have nothing to connect
             _, account = split_tile_name(name)
             base = re.sub(r'\s+\(\d{2}-\d{2}-\d{4}.*\)$', '', account).strip()
             key = (p, base)
@@ -2292,7 +2390,8 @@ class CloudAccountsDialog(QDialog):
         manual = cloud_quota.load_manual_accounts()
 
         if not mounted and not manual:
-            self.rows_box.addWidget(QLabel("No Google Drive / Dropbox mounts or added accounts found."))
+            names = " / ".join(p.label for p in cloud_quota.quota_providers())
+            self.rows_box.addWidget(QLabel(f"No {names} mounts or added accounts found."))
             return
 
         if mounted:
@@ -2334,7 +2433,7 @@ class CloudAccountsDialog(QDialog):
 
 
 class AddAccountDialog(QDialog):
-    """Add a Google Drive / Dropbox account to monitor, with no local mount required."""
+    """Add a Google Drive / Dropbox / OneDrive account to monitor, with no local mount required."""
 
     def __init__(self, parent=None, on_change=None):
         super().__init__(parent)
@@ -2345,15 +2444,17 @@ class AddAccountDialog(QDialog):
         layout = QVBoxLayout(self)
 
         layout.addWidget(QLabel(
-            "Monitor a Google Drive or Dropbox account's storage quota even if it\n"
+            "Monitor a Google Drive, Dropbox or OneDrive account's storage quota even if it\n"
             "isn't mounted locally. Needs the OAuth app credentials from\n"
             "Cloud Accounts… saved first."
         ))
 
         form = QFormLayout()
         self.provider_combo = QComboBox()
-        self.provider_combo.addItem("Google Drive", "google")
-        self.provider_combo.addItem("Dropbox", "dropbox")
+        for p in cloud_quota.quota_providers():
+            self.provider_combo.addItem(p.label, p.key)
+        for p in cloud_quota.link_only_providers():
+            self.provider_combo.addItem(f"{p.label} (link only, no quota)", p.key)
         self.label_edit = QLineEdit()
         self.label_edit.setPlaceholderText("e.g. work.account@gmail.com")
         form.addRow("Provider:", self.provider_combo)
@@ -2387,6 +2488,10 @@ class AddAccountDialog(QDialog):
             self.status_lbl.setText("An account with that label already exists.")
             return
 
+        if not cloud_quota.PROVIDERS[provider].has_quota:
+            # Link-only provider (Proton): nothing to sign in to, just add the tile.
+            self._finished(True, None, key, provider, label)
+            return
         self.status_lbl.setText("Opening browser — sign in and approve access…")
         self.worker = ConnectWorker(provider, key)
         self.worker.done.connect(lambda ok, err: self._finished(ok, err, key, provider, label))
@@ -5155,6 +5260,7 @@ class OverviewPage(QWidget):
     storage tiles, the Time Machine card's state, the Lab Health scan.
     """
     navigate = Signal(str)  # page key
+    _OPTIONAL_GAUGES = ("onedrive",)  # registry keys shown only while an account exists
 
     def __init__(self, window):
         super().__init__()
@@ -5209,6 +5315,7 @@ class OverviewPage(QWidget):
             self.gauges[key] = g
             grid.addWidget(g, 0, col)
             grid.setColumnStretch(col, 1)
+        self._gauge_grid = grid
         v.addLayout(grid)
 
         # Backup jobs | Needs attention
@@ -5260,8 +5367,22 @@ class OverviewPage(QWidget):
             else:
                 key = getattr(t, "provider", None) or "disk"
             groups.setdefault(key, []).append(t)
+        # Providers beyond the four fixed slots get a gauge only while an account exists.
+        for key in self._OPTIONAL_GAUGES:
+            present = bool(groups.get(key))
+            gauge = self.gauges.get(key)
+            if present and gauge is None:
+                gauge = Gauge(cloud_quota.PROVIDERS[key].label)
+                col = self._gauge_grid.columnCount()
+                self._gauge_grid.addWidget(gauge, 0, col)
+                self._gauge_grid.setColumnStretch(col, 1)
+                self.gauges[key] = gauge
+            if gauge is not None:
+                gauge.setVisible(present)
         for key, gauge in self.gauges.items():
             tiles = groups.get(key)
+            if key in self._OPTIONAL_GAUGES and not tiles:
+                continue
             if not tiles:
                 gauge.set_value(None, "Not set up on this Mac")
                 continue
