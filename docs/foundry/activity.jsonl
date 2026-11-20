@@ -106,3 +106,5 @@
 {"ts": "2026-11-20T17:43:20", "phase": "verify", "state": "done", "spec": "more-storage-providers"}
 {"ts": "2026-11-20T18:46:09", "phase": "verify", "state": "start", "spec": "more-storage-providers"}
 {"ts": "2026-11-20T18:50:12", "phase": "verify", "state": "done", "spec": "more-storage-providers"}
+{"ts": "2026-11-20T15:04:35", "phase": "review", "state": "start", "spec": "more-storage-providers"}
+{"ts": "2026-11-20T15:07:59", "phase": "review", "state": "done", "spec": "more-storage-providers"}
