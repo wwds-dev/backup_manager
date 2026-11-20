@@ -43,9 +43,18 @@ def _history(tmp_path, samples):
     (tmp_path / "quota_history.json").write_text(json.dumps({KEY: samples}))
 
 
+def settle(tile):
+    """Wait for the tile's quota worker and deliver its result on the GUI thread."""
+    w = tile._quota_worker
+    if w is not None:
+        assert w.wait(5000)
+    QApplication.processEvents()
+    return tile
+
+
 def _tile(qapp):
-    return main.StorageTile(KEY, Path.home(), True, provider_override="google",
-                            display_account="someone@example.com")
+    return settle(main.StorageTile(KEY, Path.home(), True, provider_override="google",
+                                   display_account="someone@example.com"))
 
 
 def _fail(monkeypatch, exc=None):
@@ -122,8 +131,8 @@ def test_overview_gauge_says_when_one_account_is_unavailable(qapp, monkeypatch, 
     monkeypatch.setattr(main.cloud_quota, "quota", quota)
     monkeypatch.setattr(main, "_append_quota_sample", lambda *a, **k: None)
     ok = _tile(qapp)
-    bad = main.StorageTile("GoogleDrive-other@example.com", Path.home(), True,
-                           provider_override="google", display_account="other@example.com")
+    bad = settle(main.StorageTile("GoogleDrive-other@example.com", Path.home(), True,
+                                  provider_override="google", display_account="other@example.com"))
     page = _gauge_page([ok, bad])
     page.refresh_gauges()
     assert "1 unavailable" in page.gauges["google"].detail_lbl.text()
@@ -131,12 +140,12 @@ def test_overview_gauge_says_when_one_account_is_unavailable(qapp, monkeypatch, 
 
 def test_quota_only_tile_without_path(qapp, monkeypatch, tmp_path):
     _fail(monkeypatch)
-    t = main.StorageTile(KEY, None, True, provider_override="google",
-                         display_account="someone@example.com", quota_only=True)
+    t = settle(main.StorageTile(KEY, None, True, provider_override="google",
+                                display_account="someone@example.com", quota_only=True))
     assert t.detail_lbl.text() == "Account quota unavailable" and t.pct is None
     _history(tmp_path, [{"ts": "2026-11-19T09:05", "used": 1, "total": 4}])
-    t = main.StorageTile(KEY, None, True, provider_override="google",
-                         display_account="someone@example.com", quota_only=True)
+    t = settle(main.StorageTile(KEY, None, True, provider_override="google",
+                                display_account="someone@example.com", quota_only=True))
     assert t.pct == 25 and "as of" in t.detail_lbl.text()
 
 
@@ -146,7 +155,8 @@ def test_real_network_errors_do_not_show_local_disk(qapp, monkeypatch):
                 requests.ConnectionError("Max retries exceeded"),
                 requests.HTTPError("503 Server Error")):
         _fail(monkeypatch, exc)
-        text = _tile(qapp).detail_lbl.text()
+        tile = _tile(qapp)
+        text = tile.detail_lbl.text()
         assert "local disk" not in text and "free of" not in text
 
 

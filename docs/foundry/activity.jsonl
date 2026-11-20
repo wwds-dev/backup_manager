@@ -38,3 +38,6 @@
 {"ts": "2026-11-20T13:35:21", "phase": "release", "state": "start", "spec": "quota-fallback-last-known"}
 {"ts": "2026-11-20T13:35:57", "phase": "release", "state": "done", "spec": "quota-fallback-last-known"}
 {"ts": "2026-11-20T13:41:57", "phase": "define", "state": "start", "spec": "quota-off-ui-thread"}
+{"ts": "2026-11-20T13:42:27", "phase": "architect", "state": "done", "spec": "quota-off-ui-thread"}
+{"ts": "2026-11-20T13:42:27", "phase": "build", "state": "start", "spec": "quota-off-ui-thread"}
+{"ts": "2026-11-20T13:45:55", "phase": "build", "state": "done", "spec": "quota-off-ui-thread"}

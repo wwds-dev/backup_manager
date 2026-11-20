@@ -1562,6 +1562,8 @@ class SparklineWidget(QWidget):
 
 
 class StorageTile(QFrame):
+    measured = Signal()  # a worker finished; pct/detail are final for this fetch
+
     def __init__(self, name, path, exists, on_connect_request=None,
                  provider_override=None, display_account=None, quota_only=False):
         super().__init__()
@@ -1571,6 +1573,9 @@ class StorageTile(QFrame):
         self._path = path
         self._exists = exists
         self._worker = None
+        self._quota_worker = None
+        self._quota_token = 0
+        self._retired = False
         self.setFixedWidth(TILE_WIDTH)
         self.setObjectName("StorageTile")
         layout = QVBoxLayout(self)
@@ -1691,52 +1696,10 @@ class StorageTile(QFrame):
             return
 
         if self.provider and cloud_quota.is_connected(self.account_key):
-            # Fetch Dropbox email dynamically (mount name doesn't include it)
-            if self.provider == "dropbox":
-                email = cloud_quota.dropbox_account_email(self.account_key)
-                if email:
-                    self.account_lbl.setText(email)
-                    self.account_lbl.setVisible(True)
-            try:
-                result = cloud_quota.quota(self.account_key)
-                quota_error = None
-            except Exception as e:
-                result = None
-                quota_error = str(e)
-            if result is not None:
-                used, total = result
-                if total:
-                    self._set_bar(int(used / total * 100))
-                    self.detail_lbl.setText(
-                        f"{human_size(used)} used of {human_size(total)}  (account quota)"
-                    )
-                    _append_quota_sample(self.account_key, used, total)
-                    self._refresh_sparkline()
-                else:
-                    self.bar.setValue(0)
-                    self.detail_lbl.setText(f"{human_size(used)} used  (unlimited plan)")
-                return
-            # Token likely expired or revoked
-            expired = quota_error and ("400" in quota_error or "401" in quota_error)
-            if expired:
-                self.bar.setValue(0)
-                self.detail_lbl.setText("")
-                self.reconnect_btn.setVisible(True)
-                return
-            # Any other failure (network, timeout, rate limit): never show the
-            # Mac disk's numbers for a connected account. Last known sample or
-            # "unavailable".
-            last = _last_known_quota(self.account_key)
-            if last is None:
-                self.bar.setValue(0)
-                self.detail_lbl.setText("Account quota unavailable")
-                return
-            used, total, ts = last
-            self._set_bar(int(used / total * 100))
-            self.detail_lbl.setText(
-                f"{human_size(used)} used of {human_size(total)}  "
-                f"(account quota, as of {_format_as_of(ts, datetime.now())})"
-            )
+            # No network here (this runs on the UI thread): show the last known
+            # sample at once, then let a worker fetch the live value.
+            self._show_last_known(placeholder="Checking account quota…")
+            self._start_quota_fetch()
             return
 
         if self.quota_only:
@@ -1755,6 +1718,97 @@ class StorageTile(QFrame):
         self.detail_lbl.setText(
             f"{human_size(usage.free)} free of {human_size(usage.total)}{suffix}"
         )
+
+    def _show_last_known(self, placeholder):
+        """Last known account sample "as of <time>", else `placeholder`. No network."""
+        last = _last_known_quota(self.account_key)
+        if last is None:
+            self.pct = None
+            self.bar.setValue(0)
+            self.detail_lbl.setText(placeholder)
+            return
+        used, total, ts = last
+        self._set_bar(int(used / total * 100))
+        self.detail_lbl.setText(
+            f"{human_size(used)} used of {human_size(total)}  "
+            f"(account quota, as of {_format_as_of(ts, datetime.now())})"
+        )
+
+    def _start_quota_fetch(self):
+        """Fetch email and quota off the UI thread; the result lands in _apply_quota."""
+        self._quota_token += 1
+        token = self._quota_token
+        key, provider = self.account_key, self.provider
+
+        def fetch():
+            # Worker thread: network only, no widget access.
+            email = None
+            if provider == "dropbox":
+                try:
+                    email = cloud_quota.dropbox_account_email(key)
+                except Exception:
+                    email = None
+            try:
+                return token, email, cloud_quota.quota(key), None
+            except Exception as e:
+                return token, email, None, str(e)
+
+        worker = CallWorker(fetch)
+        worker.done.connect(self._apply_quota)
+        self._quota_worker = replace_worker(self._quota_worker, worker)
+
+    def retire(self):
+        """The card is dropping this tile: ignore any result still in flight."""
+        self._retired = True
+        self._quota_token += 1
+        w = self._quota_worker
+        if w is not None:
+            try:
+                w.done.disconnect(self._apply_quota)
+            except (RuntimeError, TypeError):
+                pass
+
+    def _apply_quota(self, payload):
+        if self._retired or payload is None:
+            return
+        token, email, result, quota_error = payload
+        if token != self._quota_token:
+            return  # an older fetch than the one in flight
+        try:
+            self._render_quota(email, result, quota_error)
+            self.measured.emit()
+        except RuntimeError:  # C++ tile already deleted
+            pass
+
+    def _render_quota(self, email, result, quota_error):
+        self.pct = None
+        if email:
+            self.account_lbl.setText(email)
+            self.account_lbl.setVisible(True)
+        if result is not None:
+            used, total = result
+            if total:
+                self._set_bar(int(used / total * 100))
+                self.detail_lbl.setText(
+                    f"{human_size(used)} used of {human_size(total)}  (account quota)"
+                )
+                _append_quota_sample(self.account_key, used, total)
+                self._refresh_sparkline()
+            else:
+                self.bar.setValue(0)
+                self.detail_lbl.setText(f"{human_size(used)} used  (unlimited plan)")
+            return
+        # Token likely expired or revoked
+        expired = quota_error and ("400" in quota_error or "401" in quota_error)
+        if expired:
+            self.bar.setValue(0)
+            self.detail_lbl.setText("")
+            self.reconnect_btn.setVisible(True)
+            return
+        # Any other failure (network, timeout, rate limit): never show the
+        # Mac disk's numbers for a connected account. Last known sample or
+        # "unavailable".
+        self._show_last_known(placeholder="Account quota unavailable")
 
 
 class ICloudTile(QFrame):
@@ -1962,6 +2016,8 @@ class StorageCard(Card):
             item = self.tiles_row.takeAt(0)
             w = item.widget() if item is not None else None
             if w is not None:
+                if isinstance(w, StorageTile):
+                    w.retire()  # drop any quota result still in flight
                 w.hide()
                 w.setParent(None)
                 w.deleteLater()
@@ -1970,6 +2026,7 @@ class StorageCard(Card):
         mounted_keys = {name for name, _path, _exists in targets}
         for name, path, exists in targets:
             tile = StorageTile(name, path, exists, on_connect_request=self.connect_account)
+            tile.measured.connect(self.updated)
             self.tiles_row.addWidget(tile)
             self.tiles.append(tile)
         for acc in cloud_quota.load_manual_accounts():
@@ -1981,6 +2038,7 @@ class StorageCard(Card):
                 provider_override=acc["provider"], display_account=acc["label"],
                 quota_only=True,
             )
+            tile.measured.connect(self.updated)
             self.tiles_row.addWidget(tile)
             self.tiles.append(tile)
         # iCloud local cache size (no public API — shows local disk usage only)
