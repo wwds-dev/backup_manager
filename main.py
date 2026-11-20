@@ -1838,7 +1838,8 @@ class StorageTile(QFrame):
             files_text += f"  ·  trash {human_size(trash)}"
         files_lbl.setText(files_text)
         other_lbl.setText(f"Photos, Gmail and other {human_size(other)}")
-        other_lbl.setToolTip("Total minus Drive files; the API does not separate Photos from Gmail.")
+        other_lbl.setToolTip("Total minus Drive files; Google's API reports no separate figure "
+                             "within Photos, Gmail and other.")
         files_lbl.setToolTip("Drive files as Google reports them; trash is shown, not subtracted.")
         files_lbl.setVisible(True)
         other_lbl.setVisible(True)

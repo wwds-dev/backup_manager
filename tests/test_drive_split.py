@@ -194,9 +194,10 @@ def test_tile_hides_split_when_invalid(qapp, monkeypatch, result):
 
 def test_photos_never_alone(qapp, monkeypatch):
     tile = _tile(qapp, monkeypatch, cloud_quota.Quota(50 * GB, 100 * GB, drive=20 * GB, trash=1 * GB))
+    # Label and tooltip text alike (review P3-1): "Photos" only ever as "Photos, Gmail and other".
     for lbl in tile.split_lbls:
-        if "Photos" in lbl.text():
-            assert "Photos, Gmail and other" in lbl.text()
+        for text in (lbl.text(), lbl.toolTip()):
+            assert text.count("Photos") == text.count("Photos, Gmail and other"), text
 
 
 def test_failed_call_shows_old_split_as_of(qapp, monkeypatch, tmp_path):
