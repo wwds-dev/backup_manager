@@ -246,3 +246,23 @@ Proton bar shown; OneDrive gauge always present.
 - No live OneDrive sign-in: needs the owner's Entra app registration; only fakes were used.
 - No OneDrive account-name call (would need `User.Read`); the tile shows the mount or label name.
 - App not built or installed; no screenshot.
+
+## Review fix log (2026-11-20, owner: "Fix P2s + tooltip")
+
+Review: `docs/audit/more-storage-providers-review.md` on `claude/nice-agnesi-fa7204`. Tests first, one commit each:
+
+| Finding | Commit | Fix | Test |
+|---|---|---|---|
+| P2-1 | `2117864` | `_store_refresh_token` writes nothing for an account no longer in `tokens.json`; `disconnect()` holds `_refresh_lock(account_key)` then `_TOKENS_LOCK` (same order as a refresh) | `test_store_refresh_token_never_recreates_a_removed_account`, `test_disconnect_mid_refresh_stays_disconnected` (disconnect from another thread mid-refresh; asserts it waited, the entry stays gone, `is_connected` False) |
+| P2-2 | `ea347ef` | `onedrive_quota`: total is None only when the key is absent; 0, negative or non-numeric becomes 0. Tile: None -> "used (unlimited plan)", 0 -> "used (total not reported)", no percentage. Applies to any provider returning 0 | `test_quota_zero_or_unusable_total_is_not_unlimited[0,"0",None,"abc",-5]`, `test_tile_total_zero_says_not_reported`, `test_tile_total_absent_still_unlimited` |
+| P3-1 | `914774f` | Tooltip: "Total minus Drive files; Google's API reports no separate figure within Photos, Gmail and other." | `test_photos_never_alone` now checks label and tooltip |
+
+**Mutation check (7 mutants, all killed):** store recreates a removed account; disconnect without the refresh
+lock; total 0 -> None; non-numeric total -> None; negative total kept; tile shows "unlimited" for 0;
+tooltip "Photos" alone.
+
+**Suite:** tests=464, failures=0, errors=0, skipped=1 (JUnit XML). The process still exits 139 after the
+last test in this worktree (the reviewer's scratch run exited 0); pre-existing, see the build log.
+
+Left untouched as instructed: P3-2 (stale copy), P3-3 (double history read), P3-4 (redirect GET), P3-5
+(Google/Dropbox `state` and error text), for Secure or later.
