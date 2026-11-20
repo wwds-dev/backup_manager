@@ -121,6 +121,7 @@
   - Log only the number from `du`'s output and only `du: ` error lines (the path and, on timeout, the command line leak today).
   - Reword the comment: only dataless *directories* fail.
   - See `docs/audit/icloud-unavailable-review.md`.
+  - Status 2026-11-20: the test with `...avoided extra`, the log hygiene and the comment are fixed on `claude/vibrant-payne-d35ff4` (`403cff1`), merged to `main`; QA re-check passed. Still open: the `not_downloaded`/`other_errors` count assertion (QA G1), and a new QA P3: a file name containing both ": " and a newline can put a fragment of that name (never a full path) into `err=`.
 - [ ] `P2` `testing` `@ai` **`tests/test_quota_off_ui_thread.py` overwrites the live `icloud_du.log`** with a real `du` run, probably an iCloud tile worker that outlives the test's `SECRETS_DIR` patch. This breaks the test bar (spec `quota-off-ui-thread`). Also: the suite's exit-139 segfault (`TODO.md:26`) comes from `tests/test_workspace_dialog.py` alone.
 - [ ] `P3` `testing` `@me` **Look at the iCloud card on screen** (v2.166 or later): it should read "16.0 MB local cache" (no "at least"). Only the log and an offscreen render have been checked; agent screenshots failed (window on another Space, screen access declined).
 

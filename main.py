@@ -912,41 +912,56 @@ class PartialBytes(int):
     """A du total taken although du reported errors: some folders were unreadable."""
 
 
-# strerror(EDEADLK). macOS returns it when a cloud-only ("dataless") iCloud item is
-# opened by a process that will not download it: the item uses no local disk.
+# strerror(EDEADLK). macOS returns it when du tries to list a cloud-only ("dataless")
+# iCloud directory without downloading it; nothing below such a directory is local.
 DATALESS_ERROR = "Resource deadlock avoided"
+
+
+def _du_error_texts(err: str) -> list[str]:
+    """The error text of each stderr line, never a path. Only `du: <path>: <error>`
+    lines are parsed; any other line (a timeout message, the fragment of a file name
+    that contains a newline) counts as one unparsed error."""
+    texts = []
+    for ln in err.strip().splitlines():
+        if ln.startswith("du: ") and ": " in ln[4:]:
+            texts.append(ln.rsplit(": ", 1)[-1])
+        else:
+            texts.append("timed out" if "timed out" in ln else "unparsed error")
+    return texts
 
 
 def icloud_local_bytes() -> int | None:
     """Bytes used by the local iCloud cache, or None if unavailable.
 
-    `du` exits 1 after printing a total when it cannot open some items. Items that are
-    only in iCloud (not downloaded) fail with DATALESS_ERROR and take no local space, so
-    the total is still exact; any other error makes it a PartialBytes (it can understate).
-    rc, the error counts and the first other error go to `icloud_du.log` (overwritten each
-    run, no paths) so the cause of "Unavailable" is visible."""
+    `du` exits 1 after printing a total when it cannot list some directories. Directories
+    that are only in iCloud (not downloaded) fail with DATALESS_ERROR and hold nothing
+    local, so the total is still exact; any other error makes it a PartialBytes (it can
+    understate). rc, the total, the error counts and the first other error go to
+    `icloud_du.log` (overwritten each run, no paths) so the cause of "Unavailable" is
+    visible."""
     started = time.monotonic()
     rc, out, err = run_cmd(["du", "-sk", str(HOME / "Library" / "Mobile Documents")], timeout=30)
-    errors = [ln.rsplit(": ", 1)[-1] for ln in err.strip().splitlines()]
+    errors = _du_error_texts(err)
     other = [e for e in errors if e != DATALESS_ERROR]
+    lines = out.strip().splitlines()
+    try:
+        kb = int(lines[-1].split("\t", 1)[0]) if lines else None
+    except ValueError:
+        kb = None
     try:
         log = cloud_quota.SECRETS_DIR / "icloud_du.log"
         log.write_text(
             f"{datetime.now().isoformat(timespec='seconds')} rc={rc} "
-            f"secs={time.monotonic() - started:.1f} out={out.strip()[-80:]!r} "
+            f"secs={time.monotonic() - started:.1f} total_kb={kb} "
             f"not_downloaded={len(errors) - len(other)} other_errors={len(other)} "
             f"err={(other or [''])[0][:120]!r}\n")
         os.chmod(log, 0o600)
     except OSError:
         pass
-    lines = out.strip().splitlines()
-    if lines:
-        try:
-            n = int(lines[-1].split("\t", 1)[0]) * 1024
-            return n if rc == 0 or (errors and not other) else PartialBytes(n)
-        except ValueError:
-            pass
-    return None
+    if kb is None:
+        return None
+    n = kb * 1024
+    return n if rc == 0 or (errors and not other) else PartialBytes(n)
 
 
 ICLOUD_DENIED = "icloud-denied"  # marker: macOS refused access to the iCloud folder
