@@ -35,9 +35,15 @@
 {"ts": "2026-11-20T13:27:17", "phase": "define", "state": "done", "spec": "quota-fallback-last-known"}
 {"ts": "2026-11-20T13:27:18", "phase": "build", "state": "start", "spec": "quota-fallback-last-known"}
 {"ts": "2026-11-20T13:33:41", "phase": "build", "state": "done", "spec": "quota-fallback-last-known"}
+{"ts": "2026-11-20T13:34:59", "phase": "define", "state": "start", "spec": "lab-root-checks"}
 {"ts": "2026-11-20T13:35:21", "phase": "release", "state": "start", "spec": "quota-fallback-last-known"}
+{"ts": "2026-11-20T13:35:29", "phase": "define", "state": "done", "spec": "lab-root-checks"}
 {"ts": "2026-11-20T13:35:57", "phase": "release", "state": "done", "spec": "quota-fallback-last-known"}
+{"ts": "2026-11-20T13:41:47", "phase": "build", "state": "start", "spec": "lab-root-checks"}
 {"ts": "2026-11-20T13:41:57", "phase": "define", "state": "start", "spec": "quota-off-ui-thread"}
 {"ts": "2026-11-20T13:42:27", "phase": "architect", "state": "done", "spec": "quota-off-ui-thread"}
 {"ts": "2026-11-20T13:42:27", "phase": "build", "state": "start", "spec": "quota-off-ui-thread"}
 {"ts": "2026-11-20T13:45:55", "phase": "build", "state": "done", "spec": "quota-off-ui-thread"}
+{"ts": "2026-11-20T13:51:28", "phase": "build", "state": "done", "spec": "lab-root-checks"}
+{"ts": "2026-11-20T14:11:56", "phase": "build", "state": "start", "spec": "lab-root-checks"}
+{"ts": "2026-11-20T14:19:47", "phase": "build", "state": "done", "spec": "lab-root-checks"}

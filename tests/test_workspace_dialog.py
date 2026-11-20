@@ -7,7 +7,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from pathlib import Path  # noqa: E402
 
-from PySide6.QtWidgets import QApplication, QCheckBox, QDialog, QLabel, QPushButton, QWidget  # noqa: E402
+from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QLabel, QPushButton,  # noqa: E402
+                               QTableWidget, QWidget)
 
 import main  # noqa: E402
 
@@ -177,3 +178,197 @@ def test_weekly_scan_respects_switch_and_interval(qapp, monkeypatch):
     assert ran == []
     _scan_host(monkeypatch, {"last_workspace_scan": time.time() - 8 * 86400}, [])._maybe_weekly_scan()
     assert ran == [1]
+
+
+def _lab_root_rows(tmp):
+    return [{"rule": "R1", "path": str(tmp / "stray.txt"), "rel": "stray.txt", "size": 2048, "age_days": 3,
+             "why": "Unexpected file at the lab root"},
+            {"rule": "R6", "path": str(tmp / "<b>dead</b>"), "rel": "<b>dead</b>", "size": None, "age_days": 40,
+             "why": "Symlink does not resolve"}]
+
+
+class _RootHost(QWidget):
+    _workspace_ready = main.LabHealthCard._workspace_ready
+    _lab_root_table = main.LabHealthCard._lab_root_table
+
+
+def test_lab_root_table_is_report_only_with_show_in_finder(qapp, monkeypatch, tmp_path):
+    from PySide6.QtCore import Qt
+    ran = []
+    monkeypatch.setattr(main, "run_cmd", lambda args, timeout=60: ran.append(args) or (0, "", ""))
+    monkeypatch.setattr(main, "_load_state", lambda: {})
+    seen = {}
+    monkeypatch.setattr(QDialog, "exec", lambda self: seen.update(dlg=self) or 0)
+    h = _RootHost()
+    h.workspace_btn = QPushButton()
+    (tmp_path / "stray.txt").write_text("x")          # it must exist: a vanished path reveals its parent instead
+    data = _data(tmp_path)
+    data["lab_root"] = _lab_root_rows(tmp_path)
+    h._workspace_ready(data)
+    dlg = seen["dlg"]
+    [table] = dlg.findChildren(QTableWidget)
+    assert [table.horizontalHeaderItem(c).text() for c in range(5)] == ["Rule", "Path", "Size", "Age", "Why"]
+    assert table.rowCount() == 2
+    assert [table.item(0, c).text() for c in range(5)] == [
+        "R1", "stray.txt", "2.0 KB", "3 d", "Unexpected file at the lab root"]
+    assert table.item(1, 2).text() == "size unknown" and table.item(1, 1).text() == "<b>dead</b>"
+    # report only: the table adds no tick box and no cell is checkable or editable
+    assert len(_tickable(dlg)) == 2
+    for r in range(2):
+        for c in range(5):
+            assert not (table.item(r, c).flags() & (Qt.ItemIsUserCheckable | Qt.ItemIsEditable))
+    buttons = [table.cellWidget(r, 5) for r in range(2)]
+    assert [b.text() for b in buttons] == ["Show in Finder", "Show in Finder"]
+    buttons[0].click()
+    assert ran == [["open", "-R", str(tmp_path / "stray.txt")]]
+
+
+def test_lab_root_empty_says_nothing_to_report(qapp, monkeypatch, tmp_path):
+    monkeypatch.setattr(main, "_load_state", lambda: {})
+    seen = {}
+    monkeypatch.setattr(QDialog, "exec", lambda self: seen.update(
+        tables=self.findChildren(QTableWidget), labels=[l.text() for l in self.findChildren(QLabel)]) or 0)
+    h = _RootHost()
+    h.workspace_btn = QPushButton()
+    h._workspace_ready(_data(tmp_path))                 # no "lab_root" key at all
+    assert not seen["tables"] and "Nothing to report." in seen["labels"]
+
+
+def test_show_workspace_scans_the_lab_root(qapp, monkeypatch, tmp_path):
+    got = {}
+
+    class Host(QWidget):
+        show_workspace = main.LabHealthCard.show_workspace
+
+        def _workspace_ready(self, data):
+            got.update(data)
+
+    monkeypatch.setattr(main, "CallWorker", _SyncWorker)
+    monkeypatch.setattr(main, "replace_worker", lambda old, new: new)
+    monkeypatch.setattr(main, "_load_state", lambda: {})
+    monkeypatch.setattr(main, "LAB_ACTIVE", tmp_path / "lab" / "active")
+    monkeypatch.setattr(main.workspace, "scan_worktrees", lambda *a, **k: [])
+    (tmp_path / "lab" / "active").mkdir(parents=True)
+    (tmp_path / "lab" / "stray.txt").write_text("x")
+    h = Host()
+    h.workspace_btn = QPushButton()
+    h.show_workspace()
+    assert [f["rel"] for f in got["lab_root"]] == ["stray.txt"]
+
+
+# ---- fix pass: Show in Finder on a vanished path, a symlink, a failure; hostile names; a failing scan ----
+
+def _table_for(monkeypatch, tmp_path, rows, run):
+    monkeypatch.setattr(main, "run_cmd", run)
+    monkeypatch.setattr(main, "_load_state", lambda: {})
+    seen = {}
+    monkeypatch.setattr(QDialog, "exec", lambda self: seen.update(dlg=self) or 0)
+    h = _RootHost()
+    h.workspace_btn = QPushButton()
+    data = _data(tmp_path)
+    data["lab_root"] = rows
+    h._workspace_ready(data)
+    [table] = seen["dlg"].findChildren(QTableWidget)
+    return table
+
+
+def _row(path, rel=None, **kw):
+    row = {"rule": "R1", "path": str(path), "rel": rel or Path(path).name, "size": 1, "age_days": 1, "why": "w"}
+    row.update(kw)
+    return row
+
+
+def test_show_in_finder_reveals_a_real_file_with_a_short_timeout(qapp, monkeypatch, tmp_path):
+    (tmp_path / "real.txt").write_text("x")
+    calls = []
+    t = _table_for(monkeypatch, tmp_path, [_row(tmp_path / "real.txt")],
+                   lambda args, timeout=60: calls.append((args, timeout)) or (0, "", ""))
+    t.cellWidget(0, 5).click()
+    assert calls == [(["open", "-R", str(tmp_path / "real.txt")], 10)]
+
+
+def test_show_in_finder_on_a_vanished_or_broken_path_opens_the_parent(qapp, monkeypatch, tmp_path):
+    os.symlink("nowhere", tmp_path / "dead")
+    calls = []
+    t = _table_for(monkeypatch, tmp_path, [_row(tmp_path / "gone.txt"), _row(tmp_path / "dead")],
+                   lambda args, timeout=60: calls.append(args) or (0, "", ""))
+    t.cellWidget(0, 5).click()
+    t.cellWidget(1, 5).click()
+    assert calls == [["open", str(tmp_path)], ["open", str(tmp_path)]]
+
+
+def test_show_in_finder_on_a_symlink_opens_the_parent_not_the_target(qapp, monkeypatch, tmp_path):
+    (tmp_path / "target_dir").mkdir()
+    os.symlink(tmp_path / "target_dir", tmp_path / "ln")            # resolves: `open -R` would show the target
+    calls = []
+    t = _table_for(monkeypatch, tmp_path, [_row(tmp_path / "ln")],
+                   lambda args, timeout=60: calls.append(args) or (0, "", ""))
+    t.cellWidget(0, 5).click()
+    assert calls == [["open", str(tmp_path)]]
+
+
+def test_a_failed_show_in_finder_is_shown_on_the_button_and_cleared_by_a_success(qapp, monkeypatch, tmp_path):
+    (tmp_path / "f.txt").write_text("x")
+    results = iter([(1, "", "The file does not exist <b>x</b>"), (0, "", "")])
+    t = _table_for(monkeypatch, tmp_path, [_row(tmp_path / "f.txt")], lambda args, timeout=60: next(results))
+    b = t.cellWidget(0, 5)
+    b.click()
+    assert b.text() == "Failed" and "open exited 1: The file does not exist &lt;b&gt;x&lt;/b&gt;" in b.toolTip()
+    b.click()
+    assert b.text() == "Show in Finder" and b.toolTip() == ""
+
+
+def test_visible_text_replaces_control_and_format_characters():
+    assert main._visible_text("a\nb\x1bc\u202ed\u200be") == "a\\u000ab\\u001bc\\u202ed\\u200be"
+    assert main._visible_text("tag\U000e0041") == "tag\\U000e0041"            # an astral Cf character
+    assert main._visible_text("plain \u00fc \u2603 <b>") == "plain \u00fc \u2603 <b>"
+
+
+def test_table_text_and_tooltips_show_hostile_names_literally(qapp, monkeypatch, tmp_path):
+    name = "evil\u202egnp.txt\nnext"
+    t = _table_for(monkeypatch, tmp_path, [_row(tmp_path / name, rel=name, why="-> tgt\x1b[31m")],
+                  lambda args, timeout=60: (0, "", ""))
+    for c in range(5):
+        it = t.item(0, c)
+        assert "\u202e" not in it.text() and "\n" not in it.text() and "\x1b" not in it.text()
+        assert "\u202e" not in it.toolTip() and "\x1b" not in it.toolTip() and "\n" not in it.toolTip()
+    assert t.item(0, 1).text() == "evil\\u202egnp.txt\\u000anext"
+    assert "evil\\u202egnp.txt\\u000anext" in t.item(0, 1).toolTip()
+    assert t.item(0, 4).text() == "-> tgt\\u001b[31m"
+
+
+def test_partial_size_and_unknown_age_are_labelled(qapp, monkeypatch, tmp_path):
+    t = _table_for(monkeypatch, tmp_path, [_row(tmp_path / "a", size=2048, partial=True),
+                                            _row(tmp_path / "b", size=None, partial=True),
+                                            _row(tmp_path / "c", size=None, age_days=None, partial=True),
+                                            _row(tmp_path / "d", size=2048, partial=False)],
+                   lambda args, timeout=60: (0, "", ""))
+    assert [t.item(r, 2).text() for r in range(4)] == ["at least 2.0 KB", "size unknown", "size unknown", "2.0 KB"]
+    assert [t.item(r, 3).text() for r in range(4)] == ["1 d", "1 d", "age unknown", "1 d"]
+
+
+def test_show_workspace_survives_a_raising_lab_root_scan(qapp, monkeypatch, tmp_path):
+    got = {}
+
+    class Host(QWidget):
+        show_workspace = main.LabHealthCard.show_workspace
+
+        def _workspace_ready(self, data):
+            got.update(data)
+
+    monkeypatch.setattr(main, "CallWorker", _SyncWorker)
+    monkeypatch.setattr(main, "replace_worker", lambda old, new: new)
+    monkeypatch.setattr(main, "_load_state", lambda: {})
+    monkeypatch.setattr(main, "LAB_ACTIVE", tmp_path / "lab" / "active")
+    monkeypatch.setattr(main.workspace, "scan_worktrees", lambda *a, **k: [])
+    (tmp_path / "lab" / "active").mkdir(parents=True)
+
+    def boom(*a, **k):
+        raise ValueError("scan bug")
+    monkeypatch.setattr(main.lab_root_checks, "scan", boom)
+    h = Host()
+    h.workspace_btn = QPushButton()
+    h.show_workspace()
+    assert set(got) == {"backups", "archive", "caches", "lab_root"}       # the other parts are still there
+    [row] = got["lab_root"]
+    assert row["rule"] == "NOTE" and "failed" in row["why"]

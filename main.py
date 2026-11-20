@@ -23,11 +23,13 @@ import plistlib
 import re
 import shutil
 import subprocess
+import unicodedata
 import urllib.request
 
 import appkit_guard
 import backup_filter
 import lab_health
+import lab_root_checks
 import workspace
 import workspace_extra
 import version
@@ -1179,6 +1181,37 @@ def _plain_tip(text) -> str:
     """Tooltips are rich text to Qt; folder names come from other agents, so show them literally."""
     import html
     return "<p style='white-space:pre'>" + html.escape(str(text)) + "</p>"
+
+
+def _visible_text(text) -> str:
+    """Names come from other agents' folders: show control and format characters (newline, ESC, the
+    bidi overrides) as \\uXXXX so a name cannot reorder or hide the text around it."""
+    out = []
+    for ch in str(text):
+        if unicodedata.category(ch) in ("Cc", "Cf"):
+            out.append(f"\\u{ord(ch):04x}" if ord(ch) <= 0xFFFF else f"\\U{ord(ch):08x}")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def _finder_command(path: str) -> list[str]:
+    """What Show in Finder runs. `open -R` selects an existing real file or folder; a symlink (it would
+    reveal the target, maybe outside the lab) or a path that is gone (it would fail) shows its parent."""
+    if os.path.islink(path) or not os.path.lexists(path):
+        return ["open", os.path.dirname(path)]
+    return ["open", "-R", path]
+
+
+def _reveal_in_finder(button, path):
+    """Run Show in Finder (10 s at most); a non-zero result goes onto the button, not into the void."""
+    code, _out, err = run_cmd(_finder_command(path), timeout=10)
+    if code == 0:
+        button.setText("Show in Finder")
+        button.setToolTip("")
+    else:
+        button.setText("Failed")
+        button.setToolTip(_plain_tip(_visible_text(f"open exited {code}: {(err or '').strip()}")))
 
 
 def workspace_settings() -> dict:
@@ -3533,7 +3566,8 @@ class LabHealthCard(Card):
         dlg.exec()
 
     def _maybe_weekly_scan(self):
-        """Report only: counts and sizes into workspace_report.json. Deletes nothing."""
+        """Report only: counts and sizes, and the lab-root findings (file and folder names, symlink
+        targets, absolute paths), into workspace_report.json. Deletes nothing."""
         cfg = workspace_settings()
         st = _load_state()
         if not cfg["weekly"] or not workspace_extra.scan_due(st.get("last_workspace_scan")):
@@ -3571,7 +3605,8 @@ class LabHealthCard(Card):
             wts = workspace.scan_worktrees(root, min_days=cfg["worktree_days"])
             return {"backups": workspace_extra.scan_backups(root, min_days=cfg["backup_days"]),
                     "archive": workspace_extra.scan_archive(root, wts),
-                    "caches": workspace_extra.scan_root_caches(root)}
+                    "caches": workspace_extra.scan_root_caches(root),
+                    "lab_root": lab_root_checks.scan_safe(root)}
 
         worker = CallWorker(work)
         worker.done.connect(self._workspace_ready)
@@ -3592,7 +3627,7 @@ class LabHealthCard(Card):
         head = QLabel(
             f"Backups: offered when older than {cfg['backup_days']} days and no non-history doc names "
             "them; they go to the Trash with a record (Put Back restores). Caches regenerate and are "
-            "deleted. Archive is a list only. Nothing is ticked.")
+            "deleted. Archive and Lab root are lists only. Nothing is ticked.")
         head.setWordWrap(True)
         lay.addWidget(head)
         srow = QHBoxLayout()
@@ -3659,6 +3694,12 @@ class LabHealthCard(Card):
             for m in r["git_members"]:
                 plain("      " + m["rel"] + (": offered in Worktrees" if m["offered"]
                                               else ": kept (" + "; ".join(m["reasons"][:2]) + ")"), True)
+        plain("Lab root (report only: this app changes nothing here; Show in Finder, then decide)")
+        found = data.get("lab_root") or []
+        if found:
+            il.addWidget(self._lab_root_table(found))
+        else:
+            plain("Nothing to report.", True)
         il.addStretch()
         scroll.setWidget(inner)
         lay.addWidget(scroll, 1)
@@ -3729,6 +3770,37 @@ class LabHealthCard(Card):
 
         go.clicked.connect(run)
         dlg.exec()
+
+    def _lab_root_table(self, found):
+        """Report-only rows of lab_root_checks: rule, path, size, age, why, and Show in Finder."""
+        t = QTableWidget(len(found), 6)
+        t.setHorizontalHeaderLabels(["Rule", "Path", "Size", "Age", "Why", ""])
+        t.setEditTriggers(QTableWidget.NoEditTriggers)
+        t.setSelectionMode(QTableWidget.NoSelection)
+        t.verticalHeader().setVisible(False)
+        t.setWordWrap(True)
+        for i, f in enumerate(found):
+            if f["size"] is None:
+                size = "size unknown"
+            else:
+                size = ("at least " if f.get("partial") else "") + human_size(f["size"])
+            age = "age unknown" if f["age_days"] is None else f"{f['age_days']} d"
+            for c, text in enumerate((f["rule"], f["rel"], size, age, f["why"])):
+                it = QTableWidgetItem(_visible_text(text))   # plain text; names come from the lab's folders
+                it.setFlags(Qt.ItemIsEnabled)        # no tick box, nothing selectable or editable
+                it.setToolTip(_plain_tip(_visible_text(f["path"])))
+                t.setItem(i, c, it)
+            b = QPushButton("Show in Finder")
+            b.clicked.connect(lambda _=False, p=f["path"], b=b: _reveal_in_finder(b, p))   # reveal only
+            t.setCellWidget(i, 5, b)
+        hdr = t.horizontalHeader()
+        for c in (0, 2, 3, 5):
+            hdr.setSectionResizeMode(c, QHeaderView.ResizeToContents)
+        hdr.setSectionResizeMode(1, QHeaderView.Interactive)
+        hdr.setSectionResizeMode(4, QHeaderView.Stretch)
+        t.resizeRowsToContents()
+        t.setMinimumHeight(min(320, 40 + 34 * len(found)))
+        return t
 
     def _show_largest(self, info):
         worker = CallWorker(lambda: lab_health.top_folders(Path(info["path"])))
