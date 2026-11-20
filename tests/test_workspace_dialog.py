@@ -7,7 +7,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from pathlib import Path  # noqa: E402
 
-from PySide6.QtWidgets import QApplication, QCheckBox, QDialog, QLabel, QPushButton, QWidget  # noqa: E402
+from PySide6.QtWidgets import (QApplication, QCheckBox, QDialog, QLabel, QPushButton,  # noqa: E402
+                               QTableWidget, QWidget)
 
 import main  # noqa: E402
 
@@ -177,3 +178,78 @@ def test_weekly_scan_respects_switch_and_interval(qapp, monkeypatch):
     assert ran == []
     _scan_host(monkeypatch, {"last_workspace_scan": time.time() - 8 * 86400}, [])._maybe_weekly_scan()
     assert ran == [1]
+
+
+def _lab_root_rows(tmp):
+    return [{"rule": "R1", "path": str(tmp / "stray.txt"), "rel": "stray.txt", "size": 2048, "age_days": 3,
+             "why": "Unexpected file at the lab root"},
+            {"rule": "R6", "path": str(tmp / "<b>dead</b>"), "rel": "<b>dead</b>", "size": None, "age_days": 40,
+             "why": "Symlink does not resolve"}]
+
+
+class _RootHost(QWidget):
+    _workspace_ready = main.LabHealthCard._workspace_ready
+    _lab_root_table = main.LabHealthCard._lab_root_table
+
+
+def test_lab_root_table_is_report_only_with_show_in_finder(qapp, monkeypatch, tmp_path):
+    from PySide6.QtCore import Qt
+    ran = []
+    monkeypatch.setattr(main, "run_cmd", lambda args, timeout=60: ran.append(args) or (0, "", ""))
+    monkeypatch.setattr(main, "_load_state", lambda: {})
+    seen = {}
+    monkeypatch.setattr(QDialog, "exec", lambda self: seen.update(dlg=self) or 0)
+    h = _RootHost()
+    h.workspace_btn = QPushButton()
+    data = _data(tmp_path)
+    data["lab_root"] = _lab_root_rows(tmp_path)
+    h._workspace_ready(data)
+    dlg = seen["dlg"]
+    [table] = dlg.findChildren(QTableWidget)
+    assert [table.horizontalHeaderItem(c).text() for c in range(5)] == ["Rule", "Path", "Size", "Age", "Why"]
+    assert table.rowCount() == 2
+    assert [table.item(0, c).text() for c in range(5)] == [
+        "R1", "stray.txt", "2.0 KB", "3 d", "Unexpected file at the lab root"]
+    assert table.item(1, 2).text() == "size unknown" and table.item(1, 1).text() == "<b>dead</b>"
+    # report only: the table adds no tick box and no cell is checkable or editable
+    assert len(_tickable(dlg)) == 2
+    for r in range(2):
+        for c in range(5):
+            assert not (table.item(r, c).flags() & (Qt.ItemIsUserCheckable | Qt.ItemIsEditable))
+    buttons = [table.cellWidget(r, 5) for r in range(2)]
+    assert [b.text() for b in buttons] == ["Show in Finder", "Show in Finder"]
+    buttons[0].click()
+    assert ran == [["open", "-R", str(tmp_path / "stray.txt")]]
+
+
+def test_lab_root_empty_says_nothing_to_report(qapp, monkeypatch, tmp_path):
+    monkeypatch.setattr(main, "_load_state", lambda: {})
+    seen = {}
+    monkeypatch.setattr(QDialog, "exec", lambda self: seen.update(
+        tables=self.findChildren(QTableWidget), labels=[l.text() for l in self.findChildren(QLabel)]) or 0)
+    h = _RootHost()
+    h.workspace_btn = QPushButton()
+    h._workspace_ready(_data(tmp_path))                 # no "lab_root" key at all
+    assert not seen["tables"] and "Nothing to report." in seen["labels"]
+
+
+def test_show_workspace_scans_the_lab_root(qapp, monkeypatch, tmp_path):
+    got = {}
+
+    class Host(QWidget):
+        show_workspace = main.LabHealthCard.show_workspace
+
+        def _workspace_ready(self, data):
+            got.update(data)
+
+    monkeypatch.setattr(main, "CallWorker", _SyncWorker)
+    monkeypatch.setattr(main, "replace_worker", lambda old, new: new)
+    monkeypatch.setattr(main, "_load_state", lambda: {})
+    monkeypatch.setattr(main, "LAB_ACTIVE", tmp_path / "lab" / "active")
+    monkeypatch.setattr(main.workspace, "scan_worktrees", lambda *a, **k: [])
+    (tmp_path / "lab" / "active").mkdir(parents=True)
+    (tmp_path / "lab" / "stray.txt").write_text("x")
+    h = Host()
+    h.workspace_btn = QPushButton()
+    h.show_workspace()
+    assert [f["rel"] for f in got["lab_root"]] == ["stray.txt"]

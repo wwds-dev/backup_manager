@@ -27,6 +27,7 @@ import urllib.request
 import appkit_guard
 import backup_filter
 import lab_health
+import lab_root_checks
 import workspace
 import workspace_extra
 import version
@@ -3458,7 +3459,8 @@ class LabHealthCard(Card):
             wts = workspace.scan_worktrees(root, min_days=cfg["worktree_days"])
             return {"backups": workspace_extra.scan_backups(root, min_days=cfg["backup_days"]),
                     "archive": workspace_extra.scan_archive(root, wts),
-                    "caches": workspace_extra.scan_root_caches(root)}
+                    "caches": workspace_extra.scan_root_caches(root),
+                    "lab_root": lab_root_checks.scan(root)}
 
         worker = CallWorker(work)
         worker.done.connect(self._workspace_ready)
@@ -3479,7 +3481,7 @@ class LabHealthCard(Card):
         head = QLabel(
             f"Backups: offered when older than {cfg['backup_days']} days and no non-history doc names "
             "them; they go to the Trash with a record (Put Back restores). Caches regenerate and are "
-            "deleted. Archive is a list only. Nothing is ticked.")
+            "deleted. Archive and Lab root are lists only. Nothing is ticked.")
         head.setWordWrap(True)
         lay.addWidget(head)
         srow = QHBoxLayout()
@@ -3546,6 +3548,12 @@ class LabHealthCard(Card):
             for m in r["git_members"]:
                 plain("      " + m["rel"] + (": offered in Worktrees" if m["offered"]
                                               else ": kept (" + "; ".join(m["reasons"][:2]) + ")"), True)
+        plain("Lab root (report only: this app changes nothing here; Show in Finder, then decide)")
+        found = data.get("lab_root") or []
+        if found:
+            il.addWidget(self._lab_root_table(found))
+        else:
+            plain("Nothing to report.", True)
         il.addStretch()
         scroll.setWidget(inner)
         lay.addWidget(scroll, 1)
@@ -3616,6 +3624,33 @@ class LabHealthCard(Card):
 
         go.clicked.connect(run)
         dlg.exec()
+
+    def _lab_root_table(self, found):
+        """Report-only rows of lab_root_checks: rule, path, size, age, why, and Show in Finder."""
+        t = QTableWidget(len(found), 6)
+        t.setHorizontalHeaderLabels(["Rule", "Path", "Size", "Age", "Why", ""])
+        t.setEditTriggers(QTableWidget.NoEditTriggers)
+        t.setSelectionMode(QTableWidget.NoSelection)
+        t.verticalHeader().setVisible(False)
+        t.setWordWrap(True)
+        for i, f in enumerate(found):
+            size = "size unknown" if f["size"] is None else human_size(f["size"])
+            for c, text in enumerate((f["rule"], f["rel"], size, f"{f['age_days']} d", f["why"])):
+                it = QTableWidgetItem(text)          # plain text; names come from the lab's folders
+                it.setFlags(Qt.ItemIsEnabled)        # no tick box, nothing selectable or editable
+                it.setToolTip(_plain_tip(f["path"]))
+                t.setItem(i, c, it)
+            b = QPushButton("Show in Finder")
+            b.clicked.connect(lambda _=False, p=f["path"]: run_cmd(["open", "-R", p]))   # reveal only
+            t.setCellWidget(i, 5, b)
+        hdr = t.horizontalHeader()
+        for c in (0, 2, 3, 5):
+            hdr.setSectionResizeMode(c, QHeaderView.ResizeToContents)
+        hdr.setSectionResizeMode(1, QHeaderView.Interactive)
+        hdr.setSectionResizeMode(4, QHeaderView.Stretch)
+        t.resizeRowsToContents()
+        t.setMinimumHeight(min(320, 40 + 34 * len(found)))
+        return t
 
     def _show_largest(self, info):
         worker = CallWorker(lambda: lab_health.top_folders(Path(info["path"])))
