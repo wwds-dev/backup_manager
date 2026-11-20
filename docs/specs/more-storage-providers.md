@@ -1,6 +1,6 @@
 # More storage providers, and a Drive / Photos split
 
-Status: **Define, awaiting the owner's gate.** Nothing is built. Written 2026-11-20.
+Status: Define approved by the owner 2026-11-20 ("Approve"). **Architect section below awaits the owner's gate.** Nothing is built.
 
 **Problem.** (1) Add Account offers only Google Drive and Dropbox. The owner wants more known
 providers whose quota a public API really returns. (2) The Google tile shows one number; the owner
@@ -141,3 +141,74 @@ skipped: detail text only. Launch skipped (public tier, optional).
 4. Gauges: add one only when that provider has an account (proposed)?
 5. Proton: add the link-only tile with no quota (1c)?
 6. Quick-access links on every tile as in 1d?
+
+## Architect (2026-11-20; GATE: network, secrets, state)
+
+Read first: `cloud_quota.py`, `StorageTile` (`main.py:1633-1900`), `StorageCard.refresh` (`:2100`),
+`OverviewPage.refresh_gauges`, the existing tests that patch `cloud_quota.quota`.
+
+### Decisions
+1. **Provider registry** in `cloud_quota.py`: a dict `PROVIDERS[key] = Provider(label, mount_prefix,
+   web_url, credential_fields, connect, quota, has_quota)`. Keys: `google`, `dropbox`, `onedrive`,
+   `proton` (`has_quota=False`), later `box`, `pcloud`. Replaces: `provider_for_name`'s if-chain, the
+   `"Google Drive" if ... else "Dropbox"` at `main.py:1657`, `connect()`/`quota()` dispatch, the
+   Add Account combo and the Cloud Accounts credential rows. `iCloud` stays its own tile class and gets
+   only the link. Registry URLs are literals in the module; nothing from an API response is ever opened.
+2. **Quota result keeps the 2-tuple contract.** `quota()` returns `Quota`, a `tuple` subclass
+   `(used, total)` with optional attributes `.drive`, `.trash` (None unless read). `used, total = result`
+   and every existing test that patches `cloud_quota.quota` with a plain tuple keep working; the tile reads
+   `getattr(result, "drive", None)`. Chosen over a dict or a 4-tuple because those break ~20 call sites and
+   tests for no gain.
+3. **Split rule is Qt-free and tested alone:** `drive_split(used, drive, trash)` returns
+   `(drive_files, other, trash)`; `other = used - drive` only if `drive` is not None and `0 <= drive <= used`,
+   else `None`. Trash is passed through untouched, never subtracted. The tile renders from it; an invalid
+   split renders nothing extra.
+4. **History:** `_append_quota_sample` adds optional `drive` and `trash` keys; `_last_known_quota` keeps
+   returning `(used, total, ts)` and a new `_last_known_split` reads the same newest sample, so a failed
+   call shows the old split "as of" with the old totals. Old samples without the keys are valid. No file
+   format version; readers ignore unknown keys.
+5. **OneDrive flow** reuses `_wait_for_redirect` and the `REDIRECT_URI` (`http://localhost:53789/`; Entra
+   matches any port on a registered `http://localhost`). PKCE via the existing `_pkce_pair`, no secret.
+   Authority `login.microsoftonline.com/common/oauth2/v2.0`. `state` parameter: **new**, generated and
+   checked on the redirect (the current Google/Dropbox flows send none; adding it for all providers is in
+   scope for Secure, see below).
+6. **Refresh-token rotation:** `_store_refresh_token(account_key, new_token)` writes `tokens.json`
+   atomically (temp file in the same dir, `chmod 0600`, `os.replace`) under one module `threading.Lock`
+   shared by all token writes; called whenever a refresh response carries a new `refresh_token`. A per-account
+   lock around the whole refresh-then-store is required for Box and is reused by OneDrive (cheap). Overlapping
+   fetches therefore cannot interleave a read of `tokens.json` with another's write.
+7. **Link-only tiles (Proton) and links:** `StorageTile` takes `has_quota` from the registry; when False it
+   never calls `set_usage` network or disk paths: fixed text "No quota available (Proton has no public API)",
+   bar hidden, `pct` stays None, and `refresh_gauges` skips it. One link button per tile from
+   `registry.web_url` when not mounted; "Open in Finder" when mounted (unchanged).
+8. **Gauges:** the four fixed slots stay; OneDrive adds a fifth only when a OneDrive tile exists. `Gauge`
+   grouping already keys by `tile.provider`; the grid builds the extra column on `refresh_gauges` first run
+   and on account add. Proton never gets a gauge.
+9. **Threads:** unchanged: one `CallWorker` per tile via `replace_worker`; the OneDrive account-name call (if
+   any, for the account line) runs in the same worker like `dropbox_account_email`. No new `start()` site;
+   `tests/test_thread_lifetime.py` guards it.
+
+### Data and state
+`app_credentials.json` gains `onedrive: {client_id}` (no secret). `tokens.json` entries gain
+`provider: "onedrive"`. `manual_accounts.json` unchanged. `quota_history.json` samples gain optional keys.
+No new file, no new boundary: **no ADR**; this section is the record.
+
+### Build order (tests first, one commit each)
+1. `drive_split` + `Quota` + history keys + tile split lines (Google only; no new network).
+2. Registry refactor behind the existing two providers (behaviour unchanged; existing suite is the guard).
+3. OneDrive (connect, refresh with rotation, quota, mount prefix `OneDrive`, gauge).
+4. Proton link-only tile and links on every tile.
+Box and pCloud are separate later specs if the owner asks; the registry makes each one entry plus its flow.
+
+### Risks
+- Entra tenant/admin-consent failure for a work account: error text shown, never a token.
+- A refresh that returns 400 after rotation lost the token: existing "Token expired, reconnect" path applies.
+- Gauge grid change touches `OverviewPage`; covered by `test_overview.py` plus a new test.
+
+### Secure phase (required, after Review)
+Scope width of `Files.Read`; `state` check and its rollout to Google and Dropbox; loopback listener is
+bound to `127.0.0.1` only (already); atomic 0600 token writes; no token or code in error strings or logs;
+registry-only URLs opened.
+
+## Architect approval
+Pending. Do not build before the owner's explicit yes.
