@@ -96,10 +96,10 @@ def _read_json(path):
     return {}
 
 
-def _write_json(path, data):
-    SECRETS_DIR.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2))
-    os.chmod(path, 0o600)
+def _ensure_secrets_dir():
+    """Create the secrets folder owner-only (0700), and tighten one an older build left 0755."""
+    SECRETS_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(SECRETS_DIR, 0o700)
 
 
 def load_app_credentials():
@@ -107,13 +107,14 @@ def load_app_credentials():
 
 
 def save_app_credentials(data):
-    _write_json(CREDENTIALS_FILE, data)
+    _write_json_atomic(CREDENTIALS_FILE, data)
 
 
 def _write_json_atomic(path, data):
     """Write `data` to `path` as 0600 via a temp file in the same folder and os.replace,
-    so a reader never sees a half-written file and a failed write leaves the old one."""
-    SECRETS_DIR.mkdir(parents=True, exist_ok=True)
+    so a reader never sees a half-written file and a failed write leaves the old one.
+    Every secrets file (credentials, tokens, manual accounts) is written this way."""
+    _ensure_secrets_dir()
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
     try:
         os.fchmod(fd, 0o600)
@@ -187,7 +188,7 @@ def load_manual_accounts():
 
 
 def save_manual_accounts(accounts):
-    _write_json(MANUAL_ACCOUNTS_FILE, {"accounts": accounts})
+    _write_json_atomic(MANUAL_ACCOUNTS_FILE, {"accounts": accounts})
 
 
 def add_manual_account(key, provider, label):
@@ -220,8 +221,16 @@ def disconnect(account_key):
 # again before it timed out) its server is still bound to the port — so before
 # starting a new one we explicitly close out whatever's currently tracked here.
 # ----------------------------------------------------------------------------
-class _ReusableHTTPServer(http.server.HTTPServer):
+class _ReusableHTTPServer(http.server.ThreadingHTTPServer):
+    """One thread per request, so a connection that never sends a request cannot hold up the
+    real redirect or `shutdown()`. Request threads are daemons and never joined on close."""
     allow_reuse_address = True
+    daemon_threads = True
+    block_on_close = False
+
+
+# Seconds a redirect connection may sit idle before its handler gives up (socket timeout).
+_REDIRECT_REQUEST_TIMEOUT = 5
 
 
 _active_server_lock = threading.Lock()
@@ -246,11 +255,22 @@ def _wait_for_redirect(port, timeout=180):
 
     result = {}
     done = threading.Event()
+    claim = threading.Lock()
 
     class Handler(http.server.BaseHTTPRequestHandler):
+        timeout = _REDIRECT_REQUEST_TIMEOUT
+
         def do_GET(self):
-            qs = urllib.parse.urlparse(self.path).query
-            result.update(urllib.parse.parse_qs(qs))
+            query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            # Only a sign-in response ends the wait; a stray request (favicon, a probe)
+            # is answered 404 and the listener keeps waiting. The first response wins.
+            if "code" not in query and "error" not in query:
+                self.send_error(404)
+                return
+            with claim:
+                first = not done.is_set()
+                if first:
+                    result.update(query)
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.end_headers()
@@ -258,7 +278,8 @@ def _wait_for_redirect(port, timeout=180):
                 b"<html><body>Connected. You can close this tab and "
                 b"return to Backup Control Center.</body></html>"
             )
-            done.set()
+            if first:
+                done.set()
 
         def log_message(self, *args):
             pass
@@ -281,6 +302,8 @@ def google_connect(account_key):
     if not creds or not creds.get("client_id"):
         return False, "No Google Client ID / Secret saved yet."
 
+    verifier, challenge = _pkce_pair()
+    state = secrets.token_urlsafe(32)
     params = {
         "client_id": creds["client_id"],
         "redirect_uri": REDIRECT_URI,
@@ -288,12 +311,14 @@ def google_connect(account_key):
         "scope": GOOGLE_SCOPE,
         "access_type": "offline",
         "prompt": "consent",
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+        "state": state,
     }
     webbrowser.open(f"{GOOGLE_AUTH_URL}?{urllib.parse.urlencode(params)}")
-    result = _wait_for_redirect(REDIRECT_PORT)
-    code = result.get("code", [None])[0]
-    if not code:
-        return False, "No authorization code received (timed out or denied)."
+    code, error = _redirect_code(_wait_for_redirect(REDIRECT_PORT), state)
+    if error:
+        return False, error
 
     resp = requests.post(GOOGLE_TOKEN_URL, data={
         "code": code,
@@ -301,9 +326,10 @@ def google_connect(account_key):
         "client_secret": creds["client_secret"],
         "redirect_uri": REDIRECT_URI,
         "grant_type": "authorization_code",
+        "code_verifier": verifier,
     }, timeout=20)
     if resp.status_code != 200:
-        return False, f"Token exchange failed: {resp.text[:200]}"
+        return False, f"Token exchange failed: {_oauth_error_text(resp)}"
     data = resp.json()
     refresh_token = data.get("refresh_token")
     if not refresh_token:
@@ -363,6 +389,7 @@ def dropbox_connect(account_key):
         return False, "No Dropbox App Key / Secret saved yet."
 
     verifier, challenge = _pkce_pair()
+    state = secrets.token_urlsafe(32)
     params = {
         "client_id": creds["app_key"],
         "redirect_uri": REDIRECT_URI,
@@ -371,12 +398,12 @@ def dropbox_connect(account_key):
         "scope": DROPBOX_SCOPE,
         "code_challenge": challenge,
         "code_challenge_method": "S256",
+        "state": state,
     }
     webbrowser.open(f"{DROPBOX_AUTH_URL}?{urllib.parse.urlencode(params)}")
-    result = _wait_for_redirect(REDIRECT_PORT)
-    code = result.get("code", [None])[0]
-    if not code:
-        return False, "No authorization code received (timed out or denied)."
+    code, error = _redirect_code(_wait_for_redirect(REDIRECT_PORT), state)
+    if error:
+        return False, error
 
     resp = requests.post(DROPBOX_TOKEN_URL, data={
         "code": code,
@@ -387,7 +414,7 @@ def dropbox_connect(account_key):
         "code_verifier": verifier,
     }, timeout=20)
     if resp.status_code != 200:
-        return False, f"Token exchange failed: {resp.text[:200]}"
+        return False, f"Token exchange failed: {_oauth_error_text(resp)}"
     data = resp.json()
     refresh_token = data.get("refresh_token")
     if not refresh_token:
@@ -464,7 +491,7 @@ ONEDRIVE_DRIVE_URL = "https://graph.microsoft.com/v1.0/me/drive"
 def _redirect_code(result, expected_state):
     """(code, error) from the redirect query. The code is used only when `state` matches."""
     got = (result.get("state") or [""])[0]
-    if not got or not secrets.compare_digest(got, expected_state):
+    if not got or not secrets.compare_digest(got.encode(), expected_state.encode()):
         return None, "Sign-in response did not match this request (state check failed). Try again."
     code = (result.get("code") or [None])[0]
     if not code:
@@ -477,9 +504,11 @@ def _oauth_error_text(resp):
     the authorization code or a token)."""
     try:
         err = resp.json().get("error")
-    except ValueError:
+    except (ValueError, AttributeError):  # not JSON, or JSON that is not an object
         err = None
-    return f"HTTP {resp.status_code}" + (f" ({err})" if isinstance(err, str) else "")
+    # OAuth error codes are short ASCII words (invalid_grant); anything else is not shown.
+    ok = isinstance(err, str) and re.fullmatch(r"[A-Za-z0-9_.\-]{1,64}", err)
+    return f"HTTP {resp.status_code}" + (f" ({err})" if ok else "")
 
 
 def onedrive_connect(account_key):

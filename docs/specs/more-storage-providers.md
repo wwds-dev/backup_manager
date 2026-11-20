@@ -266,3 +266,38 @@ last test in this worktree (the reviewer's scratch run exited 0); pre-existing, 
 
 Left untouched as instructed: P3-2 (stale copy), P3-3 (double history read), P3-4 (redirect GET), P3-5
 (Google/Dropbox `state` and error text), for Secure or later.
+
+## Secure fix log (2026-11-20, owner: "Fix now")
+
+Secure report: `docs/audit/more-storage-providers-secure.md` on `claude/blissful-dewdney-1f30cb`. Tests first
+(`tests/test_oauth_hardening.py`), one commit each:
+
+| Finding | Commit | Fix | Test |
+|---|---|---|---|
+| P2-1 | `af48bb6` | Google and Dropbox send a `state` (`token_urlsafe(32)`) and check it with `_redirect_code` (`compare_digest`) before the code is used; Google adds PKCE S256 (`code_challenge`, `code_verifier` in the exchange) | bad, empty and missing `state` rejected with no exchange (both providers); state differs per attempt; challenge = S256(verifier sent) |
+| P2-2 + P3-2 | `c5717a8` | Listener is a `ThreadingHTTPServer` (daemon request threads, never joined on close), handler socket timeout 5 s; a request with neither `code` nor `error` gets 404 and the wait goes on; the first sign-in response wins | real loopback sockets, no provider: a stalled connection does not block the real redirect, does not hold the wait past its timeout, the port rebinds after; `/favicon.ico`, `/`, `/?foo=bar` ignored; `error=` ends the wait; a later response does not overwrite the first (`b618499`) |
+| P2-3 | `a9072ff` | `app_credentials.json` and `manual_accounts.json` go through `_write_json_atomic` (mkstemp 0600, fchmod, fsync, os.replace); the folder is created 0700 and chmod 0700 on every write (tightens an old 0755); `_write_json` removed | under umask 022 for all three files: new folder 0700 and file 0600; loose 0755/0644 tightened; the temp file is 0600 with full content before the rename; a failed replace leaves the old file and no temp file |
+| P3-1 | `fdbf6ad` | Google and Dropbox token-exchange errors use `_oauth_error_text` (status plus the OAuth error code); the code is shown only if it is a short `[A-Za-z0-9_.-]` word | no description, code or secret in the text; non-JSON body; list, nested, long or spaced `error` fields give just "HTTP 400" |
+
+**Mutation check (16 mutants, 15 killed):** each provider without the state check; Google without
+challenge or verifier; single-threaded server; joined request threads; stray request ends the wait;
+later response overwrites (killed after `b618499`); folder not chmod / default mkdir mode; credentials or
+manual accounts written non-atomically; body echo in either provider; error code unfiltered. Survivor:
+removing `os.fchmod(fd, 0o600)` is equivalent (`mkstemp` already creates 0600); kept as belt and braces.
+
+**Suite:** tests=503, failures=0, errors=0, skipped=1 (JUnit XML); the process still exits 139 at
+teardown (pre-existing).
+
+Left untouched as instructed (to TODO): Secure P3-3 (disconnect can block the UI up to ~20 s), P3-4
+(connect and an in-flight refresh can overwrite each other), P3-5 (stored numbers not range-checked),
+P3-6 (quota history written 0644, non-atomic); P3-7 needs no change. Review P3-2 (stale copy) and P3-3
+(double history read) also stay open. Not verified: Google's acceptance of PKCE for the Desktop client
+type (no live sign-in).
+
+## Verify-gap fix log (2026-11-20, Build follow-up for the second Verify pass at 2084ec2)
+Test-first, loopback sockets only, no provider call.
+- **G1** `test_listener_binds_loopback_only`: mutant `("0.0.0.0", port)` at the bind line FAILS it (restored).
+- **G2** `test_silent_connection_is_closed_after_the_handler_timeout` (timeout patched to 0.3 s): mutants `timeout = None` and `timeout = 600` both FAIL it (restored).
+- **S1** `_redirect_code` compares `.encode()` bytes, so a non-ASCII `state` is rejected with the normal "state check failed" message; `test_non_ascii_state_is_rejected_cleanly` failed with TypeError before the fix, passes after.
+- **S6** `tests/conftest.py` autouse fixture points `SECRETS_DIR`, `CREDENTIALS_FILE`, `TOKENS_FILE`, `MANUAL_ACCOUNTS_FILE` at tmp_path for every test; per-test patches still override it.
+- Suite: 507 tests, 0 failures, 0 errors, 1 skipped (503 + 4 new); exit 139 is the known Qt teardown crash. Verify should re-run.
