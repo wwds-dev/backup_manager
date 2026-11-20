@@ -103,6 +103,7 @@
 - [ ] `P3` `docs` `@ai` Add a CHANGELOG: the AGENTS.md definition of done requires one and the repo has none
 - [ ] `P3` `bug` `@ai` Lab Health: the Envs header tooltip is built before the saved thresholds are loaded, and neither it nor the hint under the day boxes is refreshed after a change, so both can quote the wrong day counts (`LabHealthCard.__init__` in `main.py`; the summary line and Idle tooltip are fine)
 - [ ] `P3` `bug` `@ai` Lab Health: the **🗂 Other caches…** button tooltip says "Nothing is deleted from here", but its dialog's **🧹 Clean checked** does delete the ticked caches; reword the tooltip
+- [ ] `P3` `docs` `@ai` **Fill the placeholder in `docs/foundry/app-context.md:77`** (Invariants): the template line `<things agents must never do or imply, …>` is still there, so the session-start hook warns "1 unfilled placeholder". Replace it with the app's real invariants (e.g. the "OK" wording, delete-only-with-confirm and no-other-worktree rules from Product) or delete it. Found 2026-11-20.
 
 ## v3 — blocked or deferred
 
