@@ -2232,6 +2232,15 @@ class ExcludesDialog(QDialog):
         layout.addLayout(row)
 
     def save(self):
+        loose = backup_filter.include_lines(
+            backup_filter.read_patterns_text(self.edit.toPlainText()))
+        if loose:
+            # The junk list is read before the secret list, so an include here could
+            # let a secret file through to Google Drive.
+            QMessageBox.warning(self, "Not saved",
+                                "Remove the include rules first; they could let secret "
+                                "files through to Google Drive:\n" + "\n".join(loose))
+            return
         EXCLUDES_FILE.write_text(self.edit.toPlainText())
         self.accept()
 
@@ -2239,12 +2248,11 @@ class ExcludesDialog(QDialog):
         """What the Google Drive copy keeps out of the first 3 folders, by the same rules
         rsync uses: the patterns in the editor, then secret_name_patterns.txt, with
         *.example / *.sample / *.template let through first (backup_filter)."""
-        patterns = [l.strip() for l in self.edit.toPlainText().splitlines()
-                    if l.strip() and not l.strip().startswith(("#", ";"))]
+        patterns = backup_filter.read_patterns_text(self.edit.toPlainText())
         secrets_file = BACKUP_DIR / backup_filter.SECRETS_NAME
         try:
             secret_patterns = backup_filter.read_patterns(secrets_file)
-        except OSError:
+        except (OSError, ValueError):
             secret_patterns = []
         if not secret_patterns:
             QMessageBox.warning(

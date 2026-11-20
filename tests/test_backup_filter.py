@@ -175,7 +175,8 @@ def test_run_single_folder_starts_rsync_with_the_shared_filter(patched, monkeypa
 
 
 @pytest.mark.parametrize("break_it", ["missing", "empty", "script_drift", "no_script",
-                                      "unknown_var"])
+                                      "unknown_var", "include_line", "clear_line",
+                                      "not_utf8", "no_junk_list"])
 def test_run_single_folder_fails_closed(patched, monkeypatch, break_it):
     secrets = patched.backup / backup_filter.SECRETS_NAME
     script = patched.backup / backup_filter.SCRIPT_NAME
@@ -190,6 +191,15 @@ def test_run_single_folder_fails_closed(patched, monkeypatch, break_it):
         script.unlink()
     elif break_it == "unknown_var":
         script.write_text(SCRIPT.replace("$SCRIPT_DIR/secret", "$OTHER/secret"))
+    elif break_it == "include_line":
+        # The junk list comes before the secret list: an include here would win.
+        (patched.backup / backup_filter.EXCLUDES_NAME).write_text(EXCLUDES + "+ .env*\n")
+    elif break_it == "clear_line":
+        (patched.backup / backup_filter.EXCLUDES_NAME).write_text(EXCLUDES + "!\n")
+    elif break_it == "not_utf8":
+        secrets.write_bytes(b".env\n\xff\xfe\n")
+    elif break_it == "no_junk_list":
+        (patched.backup / backup_filter.EXCLUDES_NAME).unlink()
     with pytest.raises(backup_filter.FilterError):
         main.single_folder_rsync_args("proj")
 
@@ -272,6 +282,29 @@ def test_preview_dialog_shows_secrets(patched, monkeypatch, qapp):
     assert "proj/.env  [secret: never sent to Google Drive]" in lines
     assert not any(l.startswith("proj/.env.example") for l in lines)
     d.deleteLater()
+
+
+def test_excludes_dialog_refuses_to_save_an_include_rule(patched, monkeypatch, qapp):
+    target = patched.backup / backup_filter.EXCLUDES_NAME
+    monkeypatch.setattr(main, "EXCLUDES_FILE", target)
+    warned = []
+    monkeypatch.setattr(main.QMessageBox, "warning", lambda *a, **k: warned.append(a))
+    d = main.ExcludesDialog()
+    d.edit.setPlainText(EXCLUDES + "+ .env*\n")
+    d.save()
+    assert warned and target.read_text() == EXCLUDES
+    d.edit.setPlainText(EXCLUDES + "*.log\n")
+    d.save()
+    assert target.read_text() == EXCLUDES + "*.log\n"
+    d.deleteLater()
+
+
+def test_pattern_spaces_are_kept_as_rsync_keeps_them():
+    """`*.tmp ` (trailing space) does not match `a.tmp` for rsync, so not in preview either."""
+    pats = backup_filter.read_patterns_text("*.tmp \n  # not a comment for rsync\n\n# c\n")
+    assert pats == ["*.tmp ", "  # not a comment for rsync"]
+    rules = backup_filter.preview_rules(pats, [])
+    assert backup_filter.first_match(rules, "a.tmp", False) is None
 
 
 @pytest.fixture(scope="module")

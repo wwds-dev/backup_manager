@@ -28,7 +28,7 @@ module, no state, threads or boundaries), Comply/Launch/Release (not released he
   secret names.
 
 ## Verify (2026-11-20)
-- `tests/test_backup_filter.py`: 13 tests. Full suite `.venv/bin/python -m pytest`: 253 passed,
+- `tests/test_backup_filter.py`: 13 tests at build, 19 after the review fixes. Full suite `.venv/bin/python -m pytest`: 253 passed,
   1 skipped (`test_appkit_guard` needs the `lab_hub` checkout beside the repo; a worktree has none).
 - Mutation check by hand, each reverted: old B1 argument list; drift check off; empty-list check off;
   preview without secrets; preview without the includes; includes after excludes; card ignoring the
@@ -37,5 +37,8 @@ module, no state, threads or boundaries), Comply/Launch/Release (not released he
   mixed case not listed) would pass both the nightly script and this path. The pattern list lives in
   `_Admin/backup/secret_name_patterns.txt`, outside this repo: follow-up, see Secure.
 
-## Secure
-See `docs/audit/folder-backup-secret-filter-security.md`.
+## Secure (2026-11-20)
+Independent read-only review by the `security-engineer` agent (not the author):
+`docs/audit/folder-backup-secret-filter-security.md`. Verdict: pass with findings, no P0 or P1.
+App-side P2-2, P3-1 and P3-3 fixed after it (see the follow-up there); full suite then 259 passed,
+1 skipped. P2-1 (letter case), the script-side half of P2-2 and P3-2/4/5 are open in `TODO.md`.

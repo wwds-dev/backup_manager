@@ -43,12 +43,20 @@ def read_patterns(path: Path) -> list[str]:
 
 
 def read_patterns_text(text: str) -> list[str]:
+    """Like rsync, keeps a line's spaces: a trailing space is part of the pattern."""
     out = []
     for raw in text.splitlines():
-        line = raw.strip()
-        if line and not line.startswith(("#", ";")):
+        line = raw.rstrip("\r")
+        if line.strip() and not line.startswith(("#", ";")):
             out.append(line)
     return out
+
+
+def include_lines(patterns: list[str]) -> list[str]:
+    """Rule lines that would let files through instead of keeping them out: `+ ` includes
+    and `!` (clear the list). The junk list is read before the secret list, so one such
+    line could let a secret file through (security review P2-2)."""
+    return [p for p in patterns if p.startswith(("+ ", "+,", "+_")) or p.strip() == "!"]
 
 
 def script_filter_args(script: Path, backup_dir: Path) -> list[str]:
@@ -85,14 +93,26 @@ def _expand(token: str, variables: dict) -> str:
 def rsync_filter_args(backup_dir: Path) -> list[str]:
     """The filter for any rsync to Google Drive. Raises FilterError instead of
     returning a filter that could let a secret-named file through."""
+    try:
+        return _rsync_filter_args(backup_dir)
+    except (ValueError, IndexError, UnicodeDecodeError) as e:
+        raise FilterError(f"cannot read the backup filter: {e}") from e
+
+
+def _rsync_filter_args(backup_dir: Path) -> list[str]:
     secrets = backup_dir / SECRETS_NAME
     try:
         if not read_patterns(secrets):
             raise FilterError(f"{SECRETS_NAME} has no patterns")
     except OSError as e:
         raise FilterError(f"cannot read {SECRETS_NAME}: {e}") from e
-    if not (backup_dir / EXCLUDES_NAME).is_file():
-        raise FilterError(f"{EXCLUDES_NAME} is missing")
+    try:
+        loose = include_lines(read_patterns(backup_dir / EXCLUDES_NAME))
+    except OSError as e:
+        raise FilterError(f"cannot read {EXCLUDES_NAME}: {e}") from e
+    if loose:
+        raise FilterError(f"{EXCLUDES_NAME} has include rules that could let secrets "
+                          f"through: {', '.join(loose)}")
     expected = expected_filter_args(backup_dir)
     actual = script_filter_args(backup_dir / SCRIPT_NAME, backup_dir)
     if actual != expected:
