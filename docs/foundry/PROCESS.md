@@ -42,7 +42,9 @@ Every change that is more than a typo goes through these phases. Each ends in a 
    work draft `docs/engagement/sow.md`. **GATE**: go or no-go; for a client also **CLIENT GATE**:
    the client accepts the quote and SOW (the owner sends them; no agent does).
 1. **Define** (`product-manager`) -> `docs/specs/<slug>.md`: problem, user, success measure,
-   non-goals. **GATE** for anything user-visible or new. For a client: then **CLIENT GATE**, the
+   non-goals, and a `Needs:` line naming the departments this change must pass (for example
+   `Needs: build, review, verify, docs`; Define is implied; `Needs: all` or no line means every
+   phase the tier runs). The dashboards count work left and forecast a release date from it. **GATE** for anything user-visible or new. For a client: then **CLIENT GATE**, the
    client accepts the spec as written (without its Design and Architecture sections).
 2. **Design** (`ux-designer`, user-facing changes only) -> section in the spec.
 3. **Architect** (`architect`) -> section in the spec; `docs/adr/NNNN-*.md` for decisions

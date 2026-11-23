@@ -79,7 +79,8 @@ unchanged behaviour, and phases the tier table marks "no". Say which were skippe
 - **Legal consults** and the optional **Domain specialist** review at Define, Architect and Review,
   read-only; their P0/P1 findings count like a reviewer's.
 - **Local models** draft, never decide (`docs/foundry/tooling/local_model.py`, loopback only, no
-  cloud fallback). Never local: gate decisions, review, QA verdicts, security, legal, architecture.
+  cloud fallback). Never local: gate decisions, review, QA verdicts, security, legal, architecture. When a task fits local, recommend it once with why, how and when to
+  return (`playbooks/model-routing.md`, "Recommending a switch to local"); never switch on your own.
 - **Radar check.** `/radar-check <scope>` at Define, before Architect, Secure, Comply, Launch and
   Release, and on any upgrade. It proposes only.
 - **Log activity** at the start and end of each phase:

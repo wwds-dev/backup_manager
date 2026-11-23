@@ -74,6 +74,54 @@ free._
 - **Effort** follows the same test: low for simple or conversational work, medium for normal
   work, high only where careful multi-step reasoning or checking pays.
 
+## Recommending a switch to local (every session, every project)
+When the work in hand fits local and a cloud model would cost more than it adds, the agent says so
+**once, before starting**, in a short block the owner can act on. It does not start the local work
+itself and does not switch models on its own.
+
+Recommend local when all of these hold: the task is one module with clear inputs and outputs; tests,
+ruff or a gate can check most of it; a wrong draft is caught by those checks; it is volume work
+(tests, wrappers, exports, changelog and docstring drafts, triage), or a cloud model has refused the
+owner's own security tooling (`local:owner-ok`). Do not recommend it for small or subtle changes (the
+cloud model writes them in about the cost of a review), for gates and judgement, or when the owner
+has already declined it in this chat.
+
+Before recommending, run a **preflight** on this Mac (skip it only when the session cannot run
+commands there, and say so):
+1. `python3 tools/local_advise.py --live "<task>"`: the model that fits the GPU limit, and a `Live:`
+   line for steps 2 and 3.
+2. Free memory now (what `--live` reads): `memory_pressure | tail -3` and `vm_stat` (free + inactive +
+   speculative pages x 16 KB). Heavy apps: `ps -Aco rss,comm | sort -rn | head -8`. The estimate is
+   conservative: macOS can compress active memory, so a model may still load when it says short.
+3. Decide, and say which in the block:
+   - **Fits now:** recommend the model and context the advisor gives.
+   - **Tight (free memory below model + KV cache + about 3 GB for macOS):** name the apps to close
+     (browsers, Docker, other models loaded in LM Studio or Ollama), then re-check; or pick the
+     smaller context or the smaller model.
+   - **Does not fit even after closing apps:** do not recommend it interactively. Offer the
+     overnight queue (`local_queue.py plan`, then `run`), logged as `@local` items in `TODO.md`, and
+     carry on with other work on a cloud model meanwhile.
+   - **Long or low-priority batch (several drafts, or a dense 27B at a few tokens per second):**
+     prefer the overnight queue over waiting; the owner reviews `MORNING.md` next day.
+
+The block always carries:
+- **Why.** What a cloud model would cost for this task against a local draft plus the cloud review
+  (the advisor's "cost saved" line, or an honest estimate marked as one); the risk (quality gap,
+  what the checks will and will not catch, privacy gain); the duration (measured tokens per second
+  from `local_profile.toml`; a dense 27B is several times slower than the 30B-A3B MoE).
+- **How.** Which model (`tools/local_advise.py` names it), then: start LM Studio's server on
+  loopback, load the model with the context the advisor gives (`lms load <model> --context-length
+  <n>`), close heavy apps, and either paste the prepared prompt into Bionic or run
+  `tools/local_queue.py` / `local_model.py`. Give the prompt ready to paste.
+- **When to come back.** The draft goes through the task's checks first; then the cloud review the
+  tier needs (Tier C: Opus audit of the changed parts). Return to a cloud model when the draft fails
+  its checks twice, a reviewer would rewrite more than about a third of it, the model will not load
+  within the GPU memory limit, or the work turns out to need judgement. Say so as soon as it is
+  noticed, so the owner can step back up early.
+
+Afterwards the agent records the result with `tools/local_queue.py mark` (pass or fail) so the
+advisor learns which kinds of work local handles well here.
+
 ## Watch list
 The model and pricing pages of every provider the studio or an app uses (Anthropic, OpenAI,
 Google, ElevenLabs, ...); LM Studio's release notes and docs (endpoints, defaults, auth); public
@@ -84,5 +132,9 @@ row ("local models" in `radar/sources.md`).
 
 ## Change log
 - 2026-11-11: seeded (baseline) with Foundry v9.
+- 2026-11-21: preflight steps 1–3 automated by `local_advise.py --live` (Fits now / Close these apps /
+  Use the overnight queue; model + KV + runtime + `macos_reserve_gb` 3 GB in `local_rules.toml`).
+- 2026-11-21: "Recommending a switch to local" added (owner request): the proactive, once-per-task
+  recommendation with cost, risk, duration, how and when to return.
 - 2026-11-17: local-model advisor, profile, overnight queue, quality record and cost-saved line
   (Foundry v12, owner-approved plan). The rule table carries its own review date.
