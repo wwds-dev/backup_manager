@@ -1,6 +1,6 @@
 # AppKit clickCount guard (macOS 27 menu bar abort)
 
-Needs: define (Shipped October before activity logging; review and QA are recorded in this spec, not in docs/audit/.)
+Needs: define, build, review, verify (Built October 2026 before activity logging; no review or QA report exists for it.)
 **Problem.** Opening the menu bar icon's menu aborted Backup Control Center at
 random (crash reports `Backup Control Center-2026-10-07-151831.ips` and
 `-154310.ips`): `-[NSEvent clickCount]` raises inside `NSMenuDidBeginTracking`

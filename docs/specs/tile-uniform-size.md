@@ -1,6 +1,6 @@
 # Storage tiles: one size, no clipped text
 
-Needs: define, design, build, verify, docs
+Needs: define, design, build, review, verify, docs (the spec says it was not reviewed by a second agent: review is open)
 **Problem.** On Storage the tiles had different heights, and the Proton Drive tiles cut their
 last line ("(22-06-2026 22:10)", "app can use)") (owner screenshot, 2026-11-20).
 

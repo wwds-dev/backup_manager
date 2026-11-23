@@ -1,6 +1,6 @@
 # Storage tiles: account date always below the email
 
-Needs: define, design, build, verify, docs
+Needs: define, design, build, review, verify, docs (the spec says it was not reviewed by a second agent: review is open)
 **Problem.** macOS appends " (DD-MM-YYYY HH:MM)" to a re-created account folder
 (`ProtonDrive-x@proton.me-folder (22-06-2026 22:10)`). The tile showed it on the email's line,
 wrapping wherever the width ran out (owner, 2026-11-20).

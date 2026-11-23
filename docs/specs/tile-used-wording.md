@@ -1,6 +1,6 @@
 # Storage tiles: say "used of" everywhere
 
-Needs: define, design, build, verify, docs
+Needs: define, design, build, review, verify, docs (the spec says it was not reviewed by a second agent: review is open)
 **Problem.** On Overview the big percentage of every card is "used", but the Mac disk detail
 line reads "345.8 GB free of 926.4 GB" while Google Drive and Dropbox read "41.6 GB used of
 100.0 GB". Same card row, two meanings (owner, 2026-11-20).
