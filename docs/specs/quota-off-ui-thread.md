@@ -1,5 +1,6 @@
 # Cloud quota off the UI thread (audit H2)
 
+Needs: define, build, review, verify, docs
 **Problem.** `StorageTile.__init__` calls `set_usage()`, which calls `cloud_quota.quota()` and
 `cloud_quota.dropbox_account_email()` synchronously: a token refresh plus an API call per connected
 account, 20 s timeout each, on every Storage refresh (5-minute timer, theme change, network back,

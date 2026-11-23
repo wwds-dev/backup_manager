@@ -1,5 +1,6 @@
 # Spec: secrets go to an encrypted vault, not to plaintext Google Drive
 
+Needs: define, architect, build, review, verify, secure, docs
 Status: **Approved by the owner 2026-10-21**: vault on `opaque1337@proton.me`; rotate the keys;
 delete the old plaintext copies after a dry-run; no SSH key or gh token backup.
 Follows git_autosync's `full-mac-backup` and `restore-and-continue` (both released 2026-10-21),

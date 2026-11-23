@@ -1,5 +1,6 @@
 # iCloud card: say why it is unavailable
 
+Needs: define, design, build, review, verify, docs
 **Problem.** On 2026-11-20 the Overview iCloud card (v2.137 and v2.141) showed "—" with
 "Unavailable". Cause, measured: macOS denies reading `~/Library/Mobile Documents`
 (`du -sk` prints "Operation not permitted", exit 1, instantly; `ls` fails the same), so

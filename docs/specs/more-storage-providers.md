@@ -1,5 +1,6 @@
 # More storage providers, and a Drive / Photos split
 
+Needs: define, architect, plan, build, review, verify, secure, docs, comply, release
 Status: Define approved by the owner 2026-11-20 ("Approve"). **Architect section below awaits the owner's gate.** Nothing is built.
 
 **Problem.** (1) Add Account offers only Google Drive and Dropbox. The owner wants more known

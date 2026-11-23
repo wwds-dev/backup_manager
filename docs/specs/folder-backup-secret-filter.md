@@ -1,5 +1,6 @@
 # Spec: the one-folder backup keeps secrets off Google Drive
 
+Needs: define, build, review, verify, secure, docs
 Status: built and reviewed 2026-11-20 on `claude/folder-backup-secret-filter-334e2b`; not merged, built or
 installed. Fixes readiness audit B1 (`docs/audit/2026-11-18-readiness-audit.md`, TODO P0).
 

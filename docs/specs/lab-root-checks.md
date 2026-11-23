@@ -1,5 +1,6 @@
 # Spec: lab-root checks (what is left of Folder Audit) in the Workspace section
 
+Needs: define, build, review, verify, secure, docs
 Status: **Define approved by the owner 2026-11-20** ("Approve, report-only", recorded in `approvals.jsonl`; this settles open question 2 as report-only; questions 1, 3 and 4 stay as proposed: separate monthly review, keep R5, a table in Workspace). Built 2026-11-20 on `claude/lab-root-checks` (see Build and Verify below). Requested by the
 owner 2026-11-20 ("merge whatever is useful of Folder Audit into Backup Control Center"; he chose "draft
 spec for app rows"). Tier `public`. Builds on `docs/specs/workspace-cleanup.md` section 3, which split the

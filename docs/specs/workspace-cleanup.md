@@ -1,5 +1,6 @@
 # Spec: workspace cleanup beyond `lab/active` (worktrees, archive, backups, root)
 
+Needs: define, design, architect, plan, build, review, verify, secure, docs
 Status: **Define approved by the owner 2026-11-17 for slice 1** ("Approve slice 1": fix 4.1 plus the
 Worktrees section; recorded in `approvals.jsonl`). **4.1 is built** (section 9). The Worktrees card
 waits at the **Architect gate** (section 10); archive, backups and caches stay proposals. Written 2026-11-17 from a read-only review; no file was changed or

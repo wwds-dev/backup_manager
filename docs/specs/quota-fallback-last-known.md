@@ -1,5 +1,6 @@
 # Quota fallback: last known value, never local disk
 
+Needs: define, design, build, review, verify, docs
 **Problem.** When a connected Google Drive or Dropbox tile's live quota call fails for any
 reason other than an expired login (400/401), `StorageTile.set_usage` shows the Mac disk's
 free space instead (`main.py`, the "showing local disk" branch). The only hint is a small
