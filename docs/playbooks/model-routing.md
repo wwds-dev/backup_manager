@@ -122,6 +122,29 @@ The block always carries:
 Afterwards the agent records the result with `tools/local_queue.py mark` (pass or fail) so the
 advisor learns which kinds of work local handles well here.
 
+## One flow: now, tonight, or a draft in the queue
+A piece of work that fits local gets **one** suggestion, before it is started, naming one of three
+places. The agent picks the place; the owner says yes or no; a no is not repeated in that chat.
+
+| Place | When | On the owner's yes |
+|---|---|---|
+| **Nightshift** (code changed in a worktree overnight, `docs/nightshift.md`) | It changes code; it is small (within the type's file cap, its files under 60% of the context); one module; tests name its files; it can wait until morning; nothing in its title is `[never]` | `tools/nightshift.py add` (below). Arming stays the owner's |
+| **Local now** ("Recommending a switch to local" above) | It is wanted today and the preflight says it fits now | The owner switches; the agent prepares the prompt |
+| **Draft queue** (`@local` in `TODO.md`, `tools/local_queue.py`) | A Markdown draft, not a code change (docs, triage, a test plan), or a batch too slow to wait for | The agent writes the `@local` line |
+
+For Nightshift the suggestion carries the type (`rename`, `docs`, `logic`, `tests`), the files (allow
+globs), the test commands, an estimate in minutes, and the verdict of
+`python3 tools/nightshift.py fit --app <app> --type <t> --title "<title>" --allow <glob> --test "<cmd>"`
+(run in the HQ; it reads files and git only, never memory, and loads nothing). Suggest only when it
+says FITS or NEEDS OWNER_OK; say which and why. On the owner's yes in chat:
+`python3 tools/nightshift.py add <the same arguments> --prompt-file <file> --estimate <min>
+--words "<the owner's yes, quoted verbatim>"`. That writes the task file approved, with the words,
+the date and `approved_via = "chat"` (owner's choice, 2026-11-24). `--draft` writes it unapproved when
+the owner asks for that. `add` never sets `owner_ok` (sensitive work stays blocked until the owner sets
+it by hand), never overwrites a task and never arms: arming is `nightshift.py arm`, run by the owner.
+Do not suggest Nightshift for work already started, for a subtle change, or for a task whose type is
+daytime only (`fit` says so).
+
 ## Watch list
 The model and pricing pages of every provider the studio or an app uses (Anthropic, OpenAI,
 Google, ElevenLabs, ...); LM Studio's release notes and docs (endpoints, defaults, auth); public
@@ -132,6 +155,8 @@ row ("local models" in `radar/sources.md`).
 
 ## Change log
 - 2026-11-11: seeded (baseline) with Foundry v9.
+- 2026-11-24: "One flow" added (owner request): Nightshift as the third place, suggested once with the
+  `fit` result and added with `nightshift.py add` on the owner's yes, which approves it (owner's choice).
 - 2026-11-21: preflight steps 1–3 automated by `local_advise.py --live` (Fits now / Close these apps /
   Use the overnight queue; model + KV + runtime + `macos_reserve_gb` 3 GB in `local_rules.toml`).
 - 2026-11-21: "Recommending a switch to local" added (owner request): the proactive, once-per-task

@@ -81,6 +81,11 @@ unchanged behaviour, and phases the tier table marks "no". Say which were skippe
 - **Local models** draft, never decide (`docs/foundry/tooling/local_model.py`, loopback only, no
   cloud fallback). Never local: gate decisions, review, QA verdicts, security, legal, architecture. When a task fits local, recommend it once with why, how and when to
   return (`playbooks/model-routing.md`, "Recommending a switch to local"); never switch on your own.
+  Work that changes code, is small, touches one module, has tests, can wait until morning and is not
+  never-local is suggested for **Nightshift** instead, once, before starting it by day: type, files,
+  tests, estimate and the result of the HQ's `tools/nightshift.py fit`. On the owner's yes, run
+  `nightshift.py add ... --words "<the owner's yes, quoted>"`; never arm, never set `owner_ok`, and do
+  not repeat a declined suggestion in that chat. One suggestion per piece of work (playbook, "One flow").
 - **Radar check.** `/radar-check <scope>` at Define, before Architect, Secure, Comply, Launch and
   Release, and on any upgrade. It proposes only.
 - **Log activity** at the start and end of each phase:
