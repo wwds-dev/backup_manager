@@ -29,6 +29,7 @@ import urllib.request
 
 import appkit_guard
 import backup_filter
+import documents_scan
 import lab_health
 import lab_root_checks
 import workspace
@@ -56,7 +57,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit, QFrame, QScrollArea, QProgressBar,
     QGraphicsDropShadowEffect, QSizePolicy, QLineEdit, QFormLayout, QComboBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QSystemTrayIcon, QMenu, QCheckBox, QSpinBox,
-    QLayout, QAbstractScrollArea, QInputDialog, QStackedWidget, QButtonGroup,
+    QLayout, QAbstractScrollArea, QInputDialog, QStackedWidget, QButtonGroup, QTabWidget,
 )
 
 import cloud_quota
@@ -3493,6 +3494,13 @@ class LabHealthCard(Card):
         wsbtn.clicked.connect(self.show_workspace)
         self.workspace_btn = wsbtn
         row.addWidget(wsbtn)
+        docbtn = secondary_button("📁 Documents…")
+        docbtn.setToolTip("Where ~/Documents can save space: biggest folders, large and old files, "
+                          "duplicates, rebuildable caches and folders that look scattered. Report "
+                          "only: nothing is ticked, moved or deleted from here.")
+        docbtn.clicked.connect(self.show_documents)
+        self.documents_btn = docbtn
+        row.addWidget(docbtn)
         row.addStretch()
         self.body(row)
         # Weekly report-only scan: the app is a menu-bar resident, so no extra launchd job.
@@ -3967,6 +3975,108 @@ class LabHealthCard(Card):
 
         go.clicked.connect(run)
         dlg.exec()
+
+    def show_documents(self):
+        self.documents_btn.setEnabled(False)
+        self.documents_btn.setText("📁 Scanning…")
+        root = Path.home() / "Documents"
+        lab = LAB_ACTIVE.parent
+        worker = CallWorker(lambda: documents_scan.scan_safe(root, lab_dir=str(lab)))
+        worker.done.connect(self._documents_ready)
+        self._documents_worker = replace_worker(getattr(self, "_documents_worker", None), worker)
+
+    def _documents_ready(self, rep):
+        self.documents_btn.setEnabled(True)
+        self.documents_btn.setText("📁 Documents…")
+        if rep is None:
+            QMessageBox.warning(self, "Documents", "The scan failed.")
+            return
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Documents: where to save space")
+        dlg.resize(900, 640)
+        lay = QVBoxLayout(dlg)
+        t = rep.get("totals", {})
+        hs = lambda n: human_size(n or 0)  # noqa: E731
+        head = QLabel(
+            f"{_visible_text(rep['root'])}: {hs(t.get('bytes'))} in {t.get('files', 0):,} files. "
+            f"Duplicates waste {hs(t.get('dupes_wasted'))} ({hs(t.get('dupes_outside_lab'))} outside lab); "
+            f"rebuildable caches {hs(t.get('regen_bytes'))} ({hs(t.get('regen_outside_lab'))} outside lab, "
+            "the rest is in Lab Health); files untouched for "
+            f"{documents_scan.OLD_DAYS // 365} years {hs(t.get('old_bytes'))}. "
+            "Report only: decide here, then act in Finder (or ask Claude to). Nothing is changed from this window.")
+        head.setWordWrap(True)
+        lay.addWidget(head)
+        for n in rep.get("notes", []):
+            nl = QLabel("⚠ " + _visible_text(n))
+            nl.setWordWrap(True)
+            lay.addWidget(nl)
+        tabs = QTabWidget()
+
+        def size_txt(r):
+            return human_size(r["size"])
+
+        def age_txt(r):
+            return f"{r['age_days']} d"
+
+        tabs.addTab(self._doc_table(
+            ["Folder", "Size", "Files"],
+            [(r["name"], human_size(r["size"]), f"{r['files']:,}", os.path.join(rep["root"], r["name"]))
+             for r in rep.get("top", [])]), "Top folders")
+        tabs.addTab(self._doc_table(
+            ["Path", "Size", "Age", "Kind"],
+            [(r["rel"], size_txt(r), age_txt(r), r["kind"], r["path"]) for r in rep.get("large", [])]),
+            f"Large ({len(rep.get('large', []))})")
+        tabs.addTab(self._doc_table(
+            ["Path", "Size", "Age"],
+            [(r["rel"], size_txt(r), age_txt(r), r["path"]) for r in rep.get("old", [])]),
+            f"Old ({len(rep.get('old', []))})")
+        dupes = sorted(rep.get("dupes", []), key=lambda g: (g["in_lab"], -g["wasted"]))
+        tabs.addTab(self._doc_table(
+            ["Copies (first path shown)", "Each", "Wasted", "Where"],
+            [(f"{g['count']}× " + _visible_text(g["rels"][0]) + ("\n" + "\n".join(map(_visible_text, g["rels"][1:4])) if g["count"] > 1 else "")
+              + (f"\n… and {g['count'] - 4} more" if g["count"] > 4 else ""),
+              human_size(g["size"]), human_size(g["wasted"]), "lab" if g["in_lab"] else "outside lab",
+              g["paths"][0]) for g in dupes]),
+            f"Duplicates ({len(dupes)})")
+        regen = sorted(rep.get("regen", []), key=lambda r: (r["in_lab"], -r["size"]))
+        tabs.addTab(self._doc_table(
+            ["Folder", "Size", "Age", "Where"],
+            [(r["rel"], size_txt(r), age_txt(r), "lab (Lab Health)" if r["in_lab"] else "outside lab", r["path"])
+             for r in regen]), f"Rebuildable ({len(regen)})")
+        tabs.addTab(self._doc_table(
+            ["Name", "Places"],
+            [(s["name"], "\n".join(map(_visible_text, s["rels"])), s["paths"][0]) for s in rep.get("scattered", [])]),
+            f"Scattered ({len(rep.get('scattered', []))})")
+        lay.addWidget(tabs, 1)
+        close = QPushButton("Close")
+        close.clicked.connect(dlg.accept)
+        lay.addWidget(close, 0, Qt.AlignRight)
+        dlg.exec()
+
+    def _doc_table(self, headers, rows):
+        """Report-only table: each row is the visible cells then the path Show in Finder reveals."""
+        t = QTableWidget(len(rows), len(headers) + 1)
+        t.setHorizontalHeaderLabels(list(headers) + [""])
+        t.setEditTriggers(QTableWidget.NoEditTriggers)
+        t.setSelectionMode(QTableWidget.NoSelection)
+        t.verticalHeader().setVisible(False)
+        t.setWordWrap(True)
+        for i, row in enumerate(rows):
+            *cells, path = row
+            for c, text in enumerate(cells):
+                it = QTableWidgetItem("\n".join(_visible_text(x) for x in str(text).split("\n")))  # plain text
+                it.setFlags(Qt.ItemIsEnabled)                # no tick box, nothing selectable or editable
+                it.setToolTip(_plain_tip(_visible_text(path)))
+                t.setItem(i, c, it)
+            b = QPushButton("Show in Finder")
+            b.clicked.connect(lambda _=False, p=path, b=b: _reveal_in_finder(b, p))   # reveal only
+            t.setCellWidget(i, len(headers), b)
+        hdr = t.horizontalHeader()
+        hdr.setSectionResizeMode(0, QHeaderView.Stretch)
+        for c in range(1, len(headers) + 1):
+            hdr.setSectionResizeMode(c, QHeaderView.ResizeToContents)
+        t.resizeRowsToContents()
+        return t
 
     def _lab_root_table(self, found):
         """Report-only rows of lab_root_checks: rule, path, size, age, why, and Show in Finder."""
